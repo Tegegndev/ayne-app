@@ -159,9 +159,9 @@ class MirkuzVisionRepository(
             if (!userQuestion.isNullOrBlank()) {
                 put("query", userQuestion)
             }
-            put("ttsProvider", "addis")
-            put("customVoice", "am-hamen")
             put("preferredLanguage", preferredLanguage)
+            put("customVoice", if (preferredLanguage == "en") "Zephyr" else "am-hamen")
+            put("ttsProvider", if (preferredLanguage == "en") "gemini" else "addis")
             put("includeAudio", true)
         }
 

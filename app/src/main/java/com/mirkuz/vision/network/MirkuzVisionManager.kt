@@ -81,9 +81,29 @@ class MirkuzVisionManager(
         activeSessionId = null
     }
 
+    // Alias for compatibility with backend developer guide
+    fun stopSpeech() = stopSpeechAndFeedback()
+
     // ========================================================
     // 1. READ TEXT STREAMING (Addis AI Realtime Stream + SSE)
     // ========================================================
+    fun readTextStream(
+        compressedJpegBase64: String,
+        onOcrReady: (signType: String, text: String, isCutOff: Boolean, guidance: String?) -> Unit,
+        onFirstAudioPlay: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        startReadTextStream(
+            compressedJpegBase64 = compressedJpegBase64,
+            userInstruction = null,
+            onOcrReceived = { signType, _, text, isCutOff, guidance ->
+                onOcrReady(signType, text, isCutOff, guidance)
+            },
+            onFirstAudioPlay = onFirstAudioPlay,
+            onError = onError
+        )
+    }
+
     fun startReadTextStream(
         compressedJpegBase64: String,
         userInstruction: String? = null,
@@ -228,9 +248,9 @@ class MirkuzVisionManager(
             if (!followUpQuestion.isNullOrBlank()) {
                 put("query", followUpQuestion)
             }
-            put("customVoice", "am-hamen")
-            put("ttsProvider", "addis")
             put("preferredLanguage", preferredLanguage)
+            put("customVoice", if (preferredLanguage == "en") "Zephyr" else "am-hamen")
+            put("ttsProvider", if (preferredLanguage == "en") "gemini" else "addis")
             put("includeAudio", true)
         }
 
@@ -294,6 +314,99 @@ class MirkuzVisionManager(
         })
     }
 
+    // Overload matching backend report signature with audioBase64 in callback
+    fun seeAndDescribe(
+        newSnapshotBase64: String? = null,
+        userQuery: String? = null,
+        preferredLanguage: String = "am",
+        onSuccess: (amharic: String, english: String, audioBase64: String?) -> Unit,
+        onError: (String) -> Unit
+    ) {
+        stopSpeechAndFeedback()
+        triggerHaptic()
+
+        val cleanQuery = userQuery?.trim()?.lowercase() ?: ""
+        if (cleanQuery.contains("አዲስ ጀምር") || cleanQuery.contains("start over") || cleanQuery.contains("reset")) {
+            resetSession()
+            onSuccess("አዲስ ውይይት ተጀምሯል። እባክዎ አዲስ ፎቶ ያንሱ።", "Session reset.", null)
+            return
+        }
+
+        val payload = JSONObject().apply {
+            if (activeSessionId != null && newSnapshotBase64 == null) {
+                put("sessionId", activeSessionId)
+                put("chatId", activeSessionId)
+            } else if (newSnapshotBase64 != null) {
+                put("imageBase64", newSnapshotBase64)
+            }
+
+            if (!userQuery.isNullOrBlank()) {
+                put("query", userQuery)
+            }
+            put("preferredLanguage", preferredLanguage)
+            put("customVoice", if (preferredLanguage == "en") "Zephyr" else "am-hamen")
+            put("ttsProvider", if (preferredLanguage == "en") "gemini" else "addis")
+            put("includeAudio", true)
+        }
+
+        val request = Request.Builder()
+            .url("${serverBaseUrl.trimEnd('/')}/api/see-and-describe")
+            .header("Content-Type", "application/json")
+            .post(payload.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+
+        okHttpClient.newCall(request).enqueue(object : Callback {
+            override fun onResponse(call: Call, response: Response) {
+                val bodyStr = response.body?.string() ?: return onError("Empty response")
+                try {
+                    val json = JSONObject(bodyStr)
+
+                    if (response.isSuccessful && json.optBoolean("success", true)) {
+                        val sid = json.optString("sessionId").ifEmpty { json.optString("chatId") }
+                        if (sid.isNotBlank() && sid != "null") {
+                            activeSessionId = sid
+                        }
+
+                        val amharicRaw = if (json.has("cleanSpeech")) {
+                            json.optString("cleanSpeech")
+                        } else {
+                            json.optString("amharic").ifEmpty {
+                                json.optString("description").ifEmpty {
+                                    json.optString("text", "")
+                                }
+                            }
+                        }
+                        val amharicSpeech = amharicRaw.cleanPrefix()
+                        val englishReasoning = json.optString("english").ifEmpty {
+                            json.optString("englishTranslation").ifEmpty {
+                                json.optString("translation", "")
+                            }
+                        }
+                        val audioBase64 = json.optJSONObject("audio")?.optString("audioBase64")
+
+                        if (!audioBase64.isNullOrEmpty()) {
+                            playBase64Audio(audioBase64)
+                        }
+
+                        onSuccess(amharicSpeech, englishReasoning, audioBase64)
+                    } else {
+                        val errorMsg = json.optString("error", "Error processing request")
+                        if (errorMsg.contains("Session expired", ignoreCase = true)) {
+                            resetSession()
+                        }
+                        onError(errorMsg)
+                    }
+                } catch (e: Exception) {
+                    onError("Failed to parse response: ${e.message}")
+                }
+            }
+
+            override fun onFailure(call: Call, e: IOException) {
+                onError(e.message ?: "Network error")
+            }
+        })
+    }
+
     // ========================================================
     // AUDIO PLAYBACK HELPERS
     // ========================================================
@@ -324,3 +437,9 @@ class MirkuzVisionManager(
             .trim()
     }
 }
+
+/**
+ * Typealias for compatibility with backend report naming conventions.
+ */
+typealias MirkuzVisionRepository = MirkuzVisionManager
+
