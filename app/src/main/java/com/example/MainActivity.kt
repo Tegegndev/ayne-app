@@ -664,96 +664,27 @@ class AyneViewModel(
         viewModelScope.launch {
             val endpoint = state.apiEndpoint
             val voice = state.customVoice
-            var receivedVision = false
-            val audioChunks = StringBuilder()
 
             // Turn 2+ Zero-Upload: If sessionId is cached, send ONLY sessionId! 0 image bytes uploaded!
-            val sendImage = if (sid != null) null else lockedImage
             val sendSessionId = sid
 
-            // 1. Attempt streaming SSE follow-up
-            val streamResult = visionApiService.seeAndDescribeStream(
-                baseEndpointUrl = endpoint,
-                imageBase64 = sendImage,
-                sessionId = sendSessionId,
-                audioBase64 = voiceBase64,
-                query = textQuery,
-                history = state.conversationHistory,
-                customVoice = voice,
-                ttsProvider = "addis",
-                mode = "general",
-                onVision = { visionEvent ->
-                    receivedVision = true
-                    processingFeedbackHelper?.stopWorkingFeedback()
-                    processingFeedbackHelper?.playSuccessTone()
-                    if (!visionEvent.sessionId.isNullOrBlank()) {
-                        activeSessionId = visionEvent.sessionId
-                    }
-                    val chosenAnswer = if (state.selectedLanguage == SupportedLanguage.ENGLISH && visionEvent.english.isNotBlank()) {
-                        visionEvent.english
-                    } else {
-                        visionEvent.amharic.ifBlank { visionEvent.english }
-                    }.cleanLabelPrefix()
-
-                    val prompt = textQuery ?: "Voice question"
-                    val updatedHistory = state.conversationHistory + listOf(
-                        ConversationTurn("user", prompt),
-                        ConversationTurn("model", chosenAnswer)
-                    )
-
-                    _uiState.update {
-                        it.copy(
-                            activeSessionId = activeSessionId,
-                            lastAnswer = chosenAnswer,
-                            lastEnglishAnswer = visionEvent.english,
-                            lastReadResponse = null,
-                            conversationHistory = updatedHistory,
-                            busyMessage = null
-                        )
-                    }
-                },
-                onAudioChunk = { chunkEvent ->
-                    audioChunks.append(chunkEvent.chunkBase64)
-                    audioPlaybackHelper.enqueueAudioChunk(
-                        context = context,
-                        rawBase64Chunk = chunkEvent.chunkBase64,
-                        format = chunkEvent.format,
-                        onError = { err ->
-                            _userMessage.tryEmit("Audio error: $err")
-                        }
-                    )
-                },
-                onDone = {
-                    _uiState.update {
-                        it.copy(
-                            isBusy = false,
-                            busyMessage = null
-                        )
-                    }
-                    val fullAudio = audioChunks.toString()
-                    if (fullAudio.isNotBlank()) {
-                        _uiState.update { it.copy(lastAudioBase64 = fullAudio) }
-                        audioPlaybackHelper.setLastConsolidatedAudio(context, fullAudio)
-                    }
-                }
-            )
-
-            // 2. Single-pass fallback if streaming fails
-            if (streamResult.isFailure && !receivedVision) {
-                val singleResult = visionApiService.seeAndDescribe(
+            if (sendSessionId != null) {
+                // Direct Fast Zero-Upload Call to /api/see-and-describe (~2.8s response budget)
+                // We do NOT send client history: the server already holds the session conversation context.
+                val result = visionApiService.seeAndDescribe(
                     endpointUrl = endpoint,
-                    imageBase64 = sendImage,
+                    imageBase64 = null,
                     sessionId = sendSessionId,
                     audioBase64 = voiceBase64,
                     query = textQuery,
-                    history = state.conversationHistory,
+                    history = emptyList(),
                     customVoice = voice,
                     ttsProvider = "addis",
                     mode = "general",
                     includeAudio = true
                 )
 
-                singleResult.onSuccess { response ->
+                result.onSuccess { response ->
                     processingFeedbackHelper?.stopWorkingFeedback()
                     processingFeedbackHelper?.playSuccessTone()
                     if (!response.sessionId.isNullOrBlank()) {
@@ -766,10 +697,10 @@ class AyneViewModel(
                     }.cleanLabelPrefix()
 
                     val userTurn = response.transcribedQuery?.takeIf { it.isNotBlank() } ?: textQuery ?: "Voice question"
-                    val updatedHistory = state.conversationHistory + listOf(
+                    val updatedHistory = (state.conversationHistory + listOf(
                         ConversationTurn("user", userTurn),
                         ConversationTurn("model", chosenAnswer)
-                    )
+                    )).takeLast(10)
 
                     _uiState.update {
                         it.copy(
@@ -806,12 +737,151 @@ class AyneViewModel(
                     val errMsg = error.localizedMessage ?: "Network error connecting to $endpoint"
                     _userMessage.tryEmit("Error: $errMsg")
                 }
-            } else if (streamResult.isFailure && receivedVision) {
-                _uiState.update {
-                    it.copy(
-                        isBusy = false,
-                        busyMessage = null
+            } else {
+                // Fallback when activeSessionId is null: stream with locked image
+                var receivedVision = false
+                val audioChunks = StringBuilder()
+
+                val streamResult = visionApiService.seeAndDescribeStream(
+                    baseEndpointUrl = endpoint,
+                    imageBase64 = lockedImage,
+                    sessionId = null,
+                    audioBase64 = voiceBase64,
+                    query = textQuery,
+                    history = state.conversationHistory.takeLast(6),
+                    customVoice = voice,
+                    ttsProvider = "addis",
+                    mode = "general",
+                    onVision = { visionEvent ->
+                        receivedVision = true
+                        processingFeedbackHelper?.stopWorkingFeedback()
+                        processingFeedbackHelper?.playSuccessTone()
+                        if (!visionEvent.sessionId.isNullOrBlank()) {
+                            activeSessionId = visionEvent.sessionId
+                        }
+                        val chosenAnswer = if (state.selectedLanguage == SupportedLanguage.ENGLISH && visionEvent.english.isNotBlank()) {
+                            visionEvent.english
+                        } else {
+                            visionEvent.amharic.ifBlank { visionEvent.english }
+                        }.cleanLabelPrefix()
+
+                        val prompt = textQuery ?: "Voice question"
+                        val updatedHistory = (state.conversationHistory + listOf(
+                            ConversationTurn("user", prompt),
+                            ConversationTurn("model", chosenAnswer)
+                        )).takeLast(10)
+
+                        _uiState.update {
+                            it.copy(
+                                activeSessionId = activeSessionId,
+                                lastAnswer = chosenAnswer,
+                                lastEnglishAnswer = visionEvent.english,
+                                lastReadResponse = null,
+                                conversationHistory = updatedHistory,
+                                busyMessage = null
+                            )
+                        }
+                    },
+                    onAudioChunk = { chunkEvent ->
+                        audioChunks.append(chunkEvent.chunkBase64)
+                        audioPlaybackHelper.enqueueAudioChunk(
+                            context = context,
+                            rawBase64Chunk = chunkEvent.chunkBase64,
+                            format = chunkEvent.format,
+                            onError = { err ->
+                                _userMessage.tryEmit("Audio error: $err")
+                            }
+                        )
+                    },
+                    onDone = {
+                        _uiState.update {
+                            it.copy(
+                                isBusy = false,
+                                busyMessage = null
+                            )
+                        }
+                        val fullAudio = audioChunks.toString()
+                        if (fullAudio.isNotBlank()) {
+                            _uiState.update { it.copy(lastAudioBase64 = fullAudio) }
+                            audioPlaybackHelper.setLastConsolidatedAudio(context, fullAudio)
+                        }
+                    }
+                )
+
+                if (streamResult.isFailure && !receivedVision) {
+                    val singleResult = visionApiService.seeAndDescribe(
+                        endpointUrl = endpoint,
+                        imageBase64 = lockedImage,
+                        sessionId = null,
+                        audioBase64 = voiceBase64,
+                        query = textQuery,
+                        history = state.conversationHistory.takeLast(6),
+                        customVoice = voice,
+                        ttsProvider = "addis",
+                        mode = "general",
+                        includeAudio = true
                     )
+
+                    singleResult.onSuccess { response ->
+                        processingFeedbackHelper?.stopWorkingFeedback()
+                        processingFeedbackHelper?.playSuccessTone()
+                        if (!response.sessionId.isNullOrBlank()) {
+                            activeSessionId = response.sessionId
+                        }
+                        val chosenAnswer = if (state.selectedLanguage == SupportedLanguage.ENGLISH && response.english.isNotBlank()) {
+                            response.english
+                        } else {
+                            response.amharic.ifBlank { response.english }
+                        }.cleanLabelPrefix()
+
+                        val userTurn = response.transcribedQuery?.takeIf { it.isNotBlank() } ?: textQuery ?: "Voice question"
+                        val updatedHistory = (state.conversationHistory + listOf(
+                            ConversationTurn("user", userTurn),
+                            ConversationTurn("model", chosenAnswer)
+                        )).takeLast(10)
+
+                        _uiState.update {
+                            it.copy(
+                                activeSessionId = activeSessionId,
+                                isBusy = false,
+                                busyMessage = null,
+                                lastAnswer = chosenAnswer,
+                                lastEnglishAnswer = response.english,
+                                lastAudioBase64 = response.audio?.audioBase64,
+                                lastResponse = response,
+                                lastReadResponse = null,
+                                conversationHistory = updatedHistory
+                            )
+                        }
+
+                        val rawAudio = response.audio?.audioBase64
+                        if (!rawAudio.isNullOrBlank()) {
+                            audioPlaybackHelper.playBase64Audio(
+                                context = context,
+                                rawBase64Audio = rawAudio,
+                                onError = { err ->
+                                    _userMessage.tryEmit("Audio error: $err")
+                                }
+                            )
+                        }
+                    }.onFailure { error ->
+                        processingFeedbackHelper?.stopWorkingFeedback()
+                        _uiState.update {
+                            it.copy(
+                                isBusy = false,
+                                busyMessage = null
+                            )
+                        }
+                        val errMsg = error.localizedMessage ?: "Network error connecting to $endpoint"
+                        _userMessage.tryEmit("Error: $errMsg")
+                    }
+                } else if (streamResult.isFailure && receivedVision) {
+                    _uiState.update {
+                        it.copy(
+                            isBusy = false,
+                            busyMessage = null
+                        )
+                    }
                 }
             }
         }

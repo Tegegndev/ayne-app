@@ -100,23 +100,22 @@ class VisualSessionManager(
             return
         }
 
-        val historyArray = JSONArray().apply {
-            conversationHistory.forEach { turn ->
-                put(JSONObject().apply {
-                    put("role", turn.role)
-                    put("text", turn.text)
-                })
-            }
-        }
-
         val payload = JSONObject().apply {
             // Zero-Upload: If sessionId is cached, send ONLY sessionId! 0 image bytes!
             if (currentSessionId != null) {
                 put("sessionId", currentSessionId)
             } else {
                 put("imageBase64", image)
+                val historyArray = JSONArray().apply {
+                    conversationHistory.takeLast(6).forEach { turn ->
+                        put(JSONObject().apply {
+                            put("role", turn.role)
+                            put("text", turn.text)
+                        })
+                    }
+                }
+                put("history", historyArray)
             }
-            put("history", historyArray)
             put("customVoice", customVoice)
             put("ttsProvider", "addis")
             put("includeAudio", true)

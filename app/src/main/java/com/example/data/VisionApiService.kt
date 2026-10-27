@@ -62,14 +62,20 @@ class VisionApiService(
                 put("mode", mode)
                 put("includeAudio", includeAudio)
 
-                val historyArray = org.json.JSONArray()
-                history.forEach { turn ->
-                    historyArray.put(JSONObject().apply {
-                        put("role", turn.role)
-                        put("text", turn.text)
-                    })
+                // Only send client history if there is NO active sessionId.
+                // When sessionId is present, the server ALREADY caches the visual session and prior conversation.
+                // Sending client history alongside sessionId causes duplicate turns on the server,
+                // bloating LLM context and degrading response latency after 2+ turns.
+                if (sessionId.isNullOrBlank() && history.isNotEmpty()) {
+                    val historyArray = org.json.JSONArray()
+                    history.takeLast(6).forEach { turn ->
+                        historyArray.put(JSONObject().apply {
+                            put("role", turn.role)
+                            put("text", turn.text)
+                        })
+                    }
+                    put("history", historyArray)
                 }
-                put("history", historyArray)
             }
 
             val mediaType = "application/json; charset=utf-8".toMediaType()
@@ -152,14 +158,17 @@ class VisionApiService(
                 put("mode", mode)
                 put("includeAudio", true)
 
-                val historyArray = org.json.JSONArray()
-                history.forEach { turn ->
-                    historyArray.put(JSONObject().apply {
-                        put("role", turn.role)
-                        put("text", turn.text)
-                    })
+                // Only send client history if there is NO active sessionId
+                if (sessionId.isNullOrBlank() && history.isNotEmpty()) {
+                    val historyArray = org.json.JSONArray()
+                    history.takeLast(6).forEach { turn ->
+                        historyArray.put(JSONObject().apply {
+                            put("role", turn.role)
+                            put("text", turn.text)
+                        })
+                    }
+                    put("history", historyArray)
                 }
-                put("history", historyArray)
             }
 
             val mediaType = "application/json; charset=utf-8".toMediaType()
