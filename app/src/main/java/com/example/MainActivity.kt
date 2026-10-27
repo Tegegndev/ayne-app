@@ -46,10 +46,12 @@ import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PhotoCamera
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -99,6 +101,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewModelScope
+import com.example.data.ReadTextResponse
 import com.example.data.VisionApiService
 import com.example.data.VisionDescribeResponse
 import com.example.ui.theme.AyneDarkCard
@@ -138,16 +141,33 @@ data class AyneUiState(
     val busyMessage: String? = null,
     val isFrontCamera: Boolean = false,
     val apiEndpoint: String = DEFAULT_ENDPOINT,
+    val readTextEndpoint: String = DEFAULT_READ_TEXT_ENDPOINT,
     val customVoice: String = "am-hamen",
-    val lastResponse: VisionDescribeResponse? = null
+    val lastResponse: VisionDescribeResponse? = null,
+    val lastReadResponse: ReadTextResponse? = null
 ) {
     companion object {
         val DEFAULT_ENDPOINT: String by lazy {
             try {
                 BuildConfig.VISION_API_URL.takeIf { it.isNotBlank() }
-                    ?: "https://api.mirkuz.ai/api/see-and-describe"
+                    ?: "https://foul-crematorium-pjp6vpw46q65h665r-3000.app.github.dev/api/see-and-describe"
             } catch (e: Throwable) {
-                "https://api.mirkuz.ai/api/see-and-describe"
+                "https://foul-crematorium-pjp6vpw46q65h665r-3000.app.github.dev/api/see-and-describe"
+            }
+        }
+
+        val DEFAULT_READ_TEXT_ENDPOINT: String by lazy {
+            try {
+                val vision = BuildConfig.VISION_API_URL
+                if (vision.contains("see-and-describe")) {
+                    vision.replace("see-and-describe", "read-text")
+                } else if (vision.isNotBlank()) {
+                    "$vision/api/read-text"
+                } else {
+                    "https://foul-crematorium-pjp6vpw46q65h665r-3000.app.github.dev/api/read-text"
+                }
+            } catch (e: Throwable) {
+                "https://foul-crematorium-pjp6vpw46q65h665r-3000.app.github.dev/api/read-text"
             }
         }
     }
@@ -160,7 +180,7 @@ sealed interface AyneAction {
     data object RepeatLastAnswer : AyneAction
     data class SelectLanguage(val language: SupportedLanguage) : AyneAction
     data object FlipCamera : AyneAction
-    data class UpdateApiEndpoint(val newUrl: String) : AyneAction
+    data class UpdateEndpoints(val visionUrl: String, val readTextUrl: String) : AyneAction
     data class UpdateVoice(val voiceId: String) : AyneAction
     data object VolumeCaptureTriggered : AyneAction
     data object VolumeFollowUpTriggered : AyneAction
@@ -195,10 +215,10 @@ class AyneViewModel(
     fun onAction(context: Context, action: AyneAction) {
         when (action) {
             is AyneAction.DescribeSurroundings -> {
-                executeVisionRequest(context, action.frameBase64, mode = "general")
+                executeVisionRequest(context, action.frameBase64)
             }
             is AyneAction.ReadText -> {
-                executeVisionRequest(context, action.frameBase64, mode = "read_text")
+                executeReadTextRequest(context, action.frameBase64)
             }
             is AyneAction.AskQuestion -> {
                 _userMessage.tryEmit("Microphone active: Speak your question... (Coming soon)")
@@ -220,12 +240,16 @@ class AyneViewModel(
                 }
                 _userMessage.tryEmit(feedback)
             }
-            is AyneAction.UpdateApiEndpoint -> {
-                val cleaned = action.newUrl.trim()
-                if (cleaned.isNotBlank()) {
-                    _uiState.update { it.copy(apiEndpoint = cleaned) }
-                    _userMessage.tryEmit("API Endpoint updated")
+            is AyneAction.UpdateEndpoints -> {
+                val cleanedVision = action.visionUrl.trim()
+                val cleanedRead = action.readTextUrl.trim()
+                _uiState.update {
+                    it.copy(
+                        apiEndpoint = cleanedVision.ifBlank { it.apiEndpoint },
+                        readTextEndpoint = cleanedRead.ifBlank { it.readTextEndpoint }
+                    )
                 }
+                _userMessage.tryEmit("API Endpoints updated")
             }
             is AyneAction.UpdateVoice -> {
                 _uiState.update { it.copy(customVoice = action.voiceId) }
@@ -242,17 +266,12 @@ class AyneViewModel(
 
     private fun executeVisionRequest(
         context: Context,
-        frameBase64: String,
-        mode: String
+        frameBase64: String
     ) {
         if (_uiState.value.isBusy) return
 
         val state = _uiState.value
-        val progressMsg = if (mode == "read_text") {
-            context.getString(R.string.reading_text_progress)
-        } else {
-            context.getString(R.string.analyzing_surroundings)
-        }
+        val progressMsg = context.getString(R.string.analyzing_surroundings)
 
         _uiState.update {
             it.copy(
@@ -270,9 +289,9 @@ class AyneViewModel(
             val result = visionApiService.seeAndDescribe(
                 endpointUrl = endpoint,
                 imageBase64 = frameBase64,
-                audioBase64 = null, // Silent 1-tap capture
+                audioBase64 = null,
                 customVoice = voice,
-                mode = mode,
+                mode = "general",
                 includeAudio = true
             )
 
@@ -291,19 +310,101 @@ class AyneViewModel(
                         lastAnswer = chosenAnswer,
                         lastEnglishAnswer = response.english,
                         lastAudioBase64 = response.audio?.audioBase64,
-                        lastResponse = response
+                        lastResponse = response,
+                        lastReadResponse = null
                     )
                 }
 
-                // Play synthesized speech if returned
                 val rawAudio = response.audio?.audioBase64
                 if (!rawAudio.isNullOrBlank()) {
                     audioPlaybackHelper.playBase64Audio(
                         context = context,
                         rawBase64Audio = rawAudio,
-                        onComplete = {
-                            // Completed playback
-                        },
+                        onError = { err ->
+                            _userMessage.tryEmit("Audio error: $err")
+                        }
+                    )
+                } else {
+                    _userMessage.tryEmit(chosenAnswer)
+                }
+            }.onFailure { error ->
+                processingFeedbackHelper?.stopWorkingFeedback()
+                _uiState.update {
+                    it.copy(
+                        isBusy = false,
+                        busyMessage = null
+                    )
+                }
+                val errMsg = error.localizedMessage ?: "Network error connecting to $endpoint"
+                _userMessage.tryEmit("Error: $errMsg")
+            }
+        }
+    }
+
+    private fun executeReadTextRequest(
+        context: Context,
+        frameBase64: String
+    ) {
+        if (_uiState.value.isBusy) return
+
+        val state = _uiState.value
+        val progressMsg = context.getString(R.string.reading_text_progress)
+
+        _uiState.update {
+            it.copy(
+                isBusy = true,
+                busyMessage = progressMsg
+            )
+        }
+        _userMessage.tryEmit(progressMsg)
+        processingFeedbackHelper?.startWorkingFeedback(viewModelScope)
+
+        viewModelScope.launch {
+            val endpoint = state.readTextEndpoint
+            val voice = state.customVoice
+            val prefLang = if (state.selectedLanguage == SupportedLanguage.ENGLISH) "en" else "am"
+
+            val result = visionApiService.readText(
+                endpointUrl = endpoint,
+                imageBase64 = frameBase64,
+                query = null,
+                audioBase64 = null,
+                customVoice = voice,
+                ttsProvider = if (prefLang == "en") "gemini" else "addis",
+                preferredLanguage = prefLang,
+                includeAudio = true
+            )
+
+            result.onSuccess { response ->
+                processingFeedbackHelper?.playSuccessTone()
+                val chosenAnswer = if (prefLang == "en" && response.english.isNotBlank()) {
+                    response.english
+                } else {
+                    response.amharic.ifBlank { response.english }
+                }
+
+                val guidanceMsg = response.cameraGuidance
+                if (!guidanceMsg.isNullOrBlank()) {
+                    _userMessage.tryEmit(guidanceMsg)
+                }
+
+                _uiState.update {
+                    it.copy(
+                        isBusy = false,
+                        busyMessage = null,
+                        lastAnswer = chosenAnswer,
+                        lastEnglishAnswer = response.english,
+                        lastAudioBase64 = response.audio?.audioBase64,
+                        lastReadResponse = response,
+                        lastResponse = null
+                    )
+                }
+
+                val rawAudio = response.audio?.audioBase64
+                if (!rawAudio.isNullOrBlank()) {
+                    audioPlaybackHelper.playBase64Audio(
+                        context = context,
+                        rawBase64Audio = rawAudio,
                         onError = { err ->
                             _userMessage.tryEmit("Audio error: $err")
                         }
@@ -423,7 +524,6 @@ fun AyneAppScreen(
             .build()
     }
 
-    // Bind CameraX dynamically according to isFrontCamera state
     val cameraSelector = if (uiState.isFrontCamera) {
         CameraSelector.DEFAULT_FRONT_CAMERA
     } else {
@@ -439,18 +539,14 @@ fun AyneAppScreen(
                 cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, imageCapture)
             }
         } catch (e: Exception) {
-            // Emulators or headless environments gracefully fallback
+            // Emulators gracefully fallback
         }
     }
 
-    // Settings dialog state
     var showSettingsDialog by remember { mutableStateOf(false) }
-
-    // Rationale dialog state
     var pendingPermissionDialog by remember { mutableStateOf<String?>(null) }
     var pendingPermissionMessage by remember { mutableStateOf("") }
 
-    // Camera permission launcher
     var onCameraGrantedAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     val cameraPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -466,7 +562,6 @@ fun AyneAppScreen(
         onCameraGrantedAction = null
     }
 
-    // Audio/Mic permission launcher
     var onMicGrantedAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     val micPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -512,7 +607,6 @@ fun AyneAppScreen(
         }
     }
 
-    // Action execution helpers
     fun triggerDescribeSurroundings() {
         requireCameraPermission {
             coroutineScope.launch {
@@ -531,7 +625,6 @@ fun AyneAppScreen(
         }
     }
 
-    // Register volume key shortcuts
     LaunchedEffect(onRegisterVolumeHandlers) {
         onRegisterVolumeHandlers?.invoke(
             { triggerDescribeSurroundings() },
@@ -589,21 +682,20 @@ fun AyneAppScreen(
             modifier = Modifier.padding(innerPadding)
         )
 
-        // Vision API Settings Dialog (Env Var + Endpoint Customizer)
         if (showSettingsDialog) {
             VisionSettingsDialog(
                 currentEndpoint = uiState.apiEndpoint,
+                currentReadTextEndpoint = uiState.readTextEndpoint,
                 currentVoice = uiState.customVoice,
                 onDismiss = { showSettingsDialog = false },
-                onSave = { newUrl, newVoice ->
+                onSave = { newVisionUrl, newReadUrl, newVoice ->
                     showSettingsDialog = false
-                    viewModel.onAction(context, AyneAction.UpdateApiEndpoint(newUrl))
+                    viewModel.onAction(context, AyneAction.UpdateEndpoints(newVisionUrl, newReadUrl))
                     viewModel.onAction(context, AyneAction.UpdateVoice(newVoice))
                 }
             )
         }
 
-        // Accessible High-Contrast Permission Rationale Dialog
         if (pendingPermissionDialog != null) {
             AlertDialog(
                 onDismissRequest = { pendingPermissionDialog = null },
@@ -702,7 +794,7 @@ fun AyneScreenContent(
             .verticalScroll(scrollState),
         verticalArrangement = Arrangement.SpaceBetween
     ) {
-        // 1. Top Bar with Flip Camera & Settings
+        // 1. Top Bar
         AyneTopBar(
             selectedLanguage = uiState.selectedLanguage,
             isFrontCamera = uiState.isFrontCamera,
@@ -716,7 +808,7 @@ fun AyneScreenContent(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // Progress / Analysis Indicator banner for visual & TalkBack awareness
+        // Progress / Analysis Indicator banner
         AnimatedVisibility(
             visible = uiState.isBusy,
             enter = fadeIn(),
@@ -761,8 +853,129 @@ fun AyneScreenContent(
             }
         }
 
-        // Last answer text card (if available) for visual inspection / accessibility
-        if (!uiState.lastAnswer.isNullOrBlank() && !uiState.isBusy) {
+        // Detailed optical reading card (when available)
+        val readResp = uiState.lastReadResponse
+        if (readResp != null && !uiState.isBusy) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 14.dp)
+                    .border(2.dp, AyneVibrantYellow, RoundedCornerShape(14.dp))
+                    .semantics {
+                        contentDescription = "Read Text Result. ${readResp.amharic.ifBlank { readResp.english }}"
+                    },
+                color = AyneDarkCard,
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    // Sign / Document Classification Badge
+                    if (!readResp.signType.isNullOrBlank() || !readResp.documentType.isNullOrBlank()) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Info,
+                                contentDescription = null,
+                                tint = AyneVibrantYellow,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = readResp.signType ?: readResp.documentType ?: "",
+                                color = AyneVibrantYellow,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    // Spatial Location Context
+                    if (!readResp.locationContext.isNullOrBlank()) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.LocationOn,
+                                contentDescription = null,
+                                tint = AynePureWhite,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = readResp.locationContext,
+                                color = AynePureWhite,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+
+                    // Spoken Reading Text
+                    Text(
+                        text = uiState.lastAnswer ?: readResp.amharic,
+                        color = AynePureWhite,
+                        fontSize = 17.sp,
+                        lineHeight = 24.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+
+                    // Extracted Verbatim Text (if different)
+                    if (!readResp.extractedText.isNullOrBlank() && readResp.extractedText != readResp.amharic) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = AynePureBlack,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text(
+                                    text = stringResource(R.string.extracted_text_label),
+                                    color = AyneVibrantYellow,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = readResp.extractedText,
+                                    color = AynePureWhite.copy(alpha = 0.9f),
+                                    fontSize = 14.sp,
+                                    lineHeight = 20.sp
+                                )
+                            }
+                        }
+                    }
+
+                    // Camera Guidance alert if cut off or blurry
+                    if (!readResp.cameraGuidance.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(AyneVibrantYellow.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
+                                .padding(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Warning,
+                                contentDescription = null,
+                                tint = AyneVibrantYellow,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = readResp.cameraGuidance,
+                                color = AyneVibrantYellow,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+            }
+        } else if (!uiState.lastAnswer.isNullOrBlank() && !uiState.isBusy) {
+            // General description answer card
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -802,7 +1015,7 @@ fun AyneScreenContent(
                 .weight(1f, fill = false),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Card 1: Describe Surroundings (Mirkuz Vision see-and-describe API)
+            // Card 1: Describe Surroundings (POST /api/see-and-describe)
             AyneActionCard(
                 icon = Icons.Filled.PhotoCamera,
                 title = stringResource(R.string.describe_surroundings_title),
@@ -812,7 +1025,7 @@ fun AyneScreenContent(
                 onClick = onDescribeClick
             )
 
-            // Card 2: Read Text (mode: read_text)
+            // Card 2: Read Text (POST /api/read-text)
             AyneActionCard(
                 icon = Icons.Filled.Description,
                 title = stringResource(R.string.read_text_title),
@@ -881,7 +1094,6 @@ fun AyneTopBar(
                 heading()
             }
         ) {
-            // Yellow circular badge with walking person
             Box(
                 modifier = Modifier
                     .size(34.dp)
@@ -1046,7 +1258,6 @@ fun AyneActionCard(
                 .padding(horizontal = 24.dp, vertical = 22.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Large 48dp vibrant yellow Material icon
             Icon(
                 imageVector = icon,
                 contentDescription = null,
@@ -1056,7 +1267,6 @@ fun AyneActionCard(
 
             Spacer(modifier = Modifier.width(24.dp))
 
-            // Title and Subtitle
             Column(
                 verticalArrangement = Arrangement.Center
             ) {
@@ -1099,7 +1309,6 @@ fun AyneBottomControls(
         modifier = modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Solid vibrant yellow repeat button
         Button(
             onClick = onRepeatClick,
             modifier = Modifier
@@ -1139,8 +1348,6 @@ fun AyneBottomControls(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // Centered hint line in white with yellow triangles:
-        // "Volume ▲ capture · Volume ▼ follow-up"
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1192,19 +1399,23 @@ fun AyneBottomControls(
 @Composable
 fun VisionSettingsDialog(
     currentEndpoint: String,
+    currentReadTextEndpoint: String,
     currentVoice: String,
     onDismiss: () -> Unit,
-    onSave: (newEndpoint: String, newVoice: String) -> Unit
+    onSave: (newVisionUrl: String, newReadTextUrl: String, newVoice: String) -> Unit
 ) {
-    var endpointText by remember { mutableStateOf(currentEndpoint) }
+    var visionUrlText by remember { mutableStateOf(currentEndpoint) }
+    var readTextUrlText by remember { mutableStateOf(currentReadTextEndpoint) }
     var selectedVoice by remember { mutableStateOf(currentVoice) }
 
     val voices = listOf(
         "am-hamen" to "am-hamen (Addis Native Amharic, Female)",
         "am-simon" to "am-simon (Addis Native Amharic, Male)",
+        "am-yohanes-calm" to "am-yohanes-calm (Addis Calm Narrative)",
+        "am-tesfa" to "am-tesfa (Addis Energetic Daily)",
         "Zephyr" to "Zephyr (Gemini Neural, Fast Clear)",
+        "Aoede" to "Aoede (Gemini Neural, Warm Reading)",
         "Puck" to "Puck (Gemini Neural, Upbeat)",
-        "Aoede" to "Aoede (Gemini Neural, Warm)",
         "Fenrir" to "Fenrir (Gemini Neural, Calm)"
     )
 
@@ -1237,12 +1448,37 @@ fun VisionSettingsDialog(
                     color = AynePureWhite
                 )
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
+                // See and Describe URL
                 OutlinedTextField(
-                    value = endpointText,
-                    onValueChange = { endpointText = it },
-                    label = { Text("VISION_API_URL", color = AyneVibrantYellow) },
+                    value = visionUrlText,
+                    onValueChange = { visionUrlText = it },
+                    label = { Text(stringResource(R.string.vision_endpoint_label), color = AyneVibrantYellow) },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = AyneVibrantYellow,
+                        unfocusedBorderColor = AynePureWhite,
+                        focusedTextColor = AynePureWhite,
+                        unfocusedTextColor = AynePureWhite,
+                        cursorColor = AyneVibrantYellow
+                    ),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Uri,
+                        imeAction = ImeAction.Next
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("api_endpoint_input")
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Read Text & Signs URL
+                OutlinedTextField(
+                    value = readTextUrlText,
+                    onValueChange = { readTextUrlText = it },
+                    label = { Text(stringResource(R.string.read_text_endpoint_label), color = AyneVibrantYellow) },
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = AyneVibrantYellow,
@@ -1257,7 +1493,7 @@ fun VisionSettingsDialog(
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .testTag("api_endpoint_input")
+                        .testTag("read_text_endpoint_input")
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -1278,7 +1514,7 @@ fun VisionSettingsDialog(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { selectedVoice = voiceId }
-                            .padding(vertical = 6.dp)
+                            .padding(vertical = 5.dp)
                     ) {
                         Text(
                             text = if (isChosen) "● " else "○ ",
@@ -1298,7 +1534,7 @@ fun VisionSettingsDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onSave(endpointText, selectedVoice) },
+                onClick = { onSave(visionUrlText, readTextUrlText, selectedVoice) },
                 colors = ButtonDefaults.buttonColors(
                     containerColor = AyneVibrantYellow,
                     contentColor = AyneOnYellow

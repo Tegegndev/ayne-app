@@ -44,6 +44,7 @@ class VisionApiService(
                 .url(endpointUrl)
                 .post(requestBody)
                 .addHeader("Content-Type", "application/json")
+                .addHeader("Accept", "application/json")
                 .build()
 
             val response = client.newCall(request).execute()
@@ -55,6 +56,56 @@ class VisionApiService(
             }
 
             val parsed = VisionDescribeResponse.fromJson(responseBody)
+            Result.success(parsed)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun readText(
+        endpointUrl: String,
+        imageBase64: String,
+        query: String? = null,
+        audioBase64: String? = null,
+        customVoice: String = "am-hamen",
+        ttsProvider: String = "addis",
+        preferredLanguage: String = "am",
+        includeAudio: Boolean = true
+    ): Result<ReadTextResponse> = withContext(Dispatchers.IO) {
+        try {
+            val jsonPayload = JSONObject().apply {
+                put("imageBase64", imageBase64)
+                if (!query.isNullOrBlank()) {
+                    put("query", query)
+                }
+                if (!audioBase64.isNullOrBlank()) {
+                    put("audioBase64", audioBase64)
+                }
+                put("customVoice", customVoice)
+                put("ttsProvider", ttsProvider)
+                put("preferredLanguage", preferredLanguage)
+                put("includeAudio", includeAudio)
+            }
+
+            val mediaType = "application/json; charset=utf-8".toMediaType()
+            val requestBody = jsonPayload.toString().toRequestBody(mediaType)
+
+            val request = Request.Builder()
+                .url(endpointUrl)
+                .post(requestBody)
+                .addHeader("Content-Type", "application/json")
+                .addHeader("Accept", "application/json")
+                .build()
+
+            val response = client.newCall(request).execute()
+            val responseBody = response.body?.string()
+
+            if (!response.isSuccessful || responseBody.isNullOrBlank()) {
+                val errorMsg = "API returned HTTP ${response.code}: ${responseBody?.take(150) ?: "Empty response"}"
+                return@withContext Result.failure(IOException(errorMsg))
+            }
+
+            val parsed = ReadTextResponse.fromJson(responseBody)
             Result.success(parsed)
         } catch (e: Exception) {
             Result.failure(e)

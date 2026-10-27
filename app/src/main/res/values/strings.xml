@@ -34,6 +34,12 @@
     <string name="reading_text_progress">Analyzing and reading text… Processing audio tone active. Please hold steady.</string>
     <string name="working_sound_active">Working tone playing</string>
     
+    <!-- Optical Reading Labels -->
+    <string name="detected_sign_label">Sign / Document</string>
+    <string name="detected_location_label">Location</string>
+    <string name="extracted_text_label">Extracted Text</string>
+    <string name="camera_guidance_label">Camera Guidance</string>
+    
     <!-- Camera Flip -->
     <string name="flip_camera_desc">Flip camera. Currently using %1$s camera.</string>
     <string name="camera_front">front</string>
@@ -48,8 +54,10 @@
     
     <!-- Settings Dialog -->
     <string name="settings_button_desc">API endpoint settings</string>
-    <string name="settings_dialog_title">Vision API Endpoint</string>
-    <string name="settings_dialog_subtitle">Endpoint configured from VISION_API_URL environment variable:</string>
+    <string name="settings_dialog_title">Mirkuz Vision API Endpoints</string>
+    <string name="settings_dialog_subtitle">Endpoints configured from environment variables:</string>
+    <string name="vision_endpoint_label">See &amp; Describe URL</string>
+    <string name="read_text_endpoint_label">Read Text &amp; Signs URL</string>
     <string name="voice_selector_label">Voice Selection</string>
     <string name="save_button">Save</string>
     <string name="cancel_button">Cancel</string>

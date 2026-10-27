@@ -31,6 +31,12 @@
     <string name="reading_text_progress">ጽሑፉን እያጠናና እያነበበ ነው… የድምፅ ምልክት በርቷል። እባክዎን ሳያንቀሳቅሱ ያቆዩ።</string>
     <string name="working_sound_active">የሥራ ድምፅ ምልክት</string>
     
+    <!-- Optical Reading Labels -->
+    <string name="detected_sign_label">የምልክት / የሰነድ አይነት</string>
+    <string name="detected_location_label">ቦታ</string>
+    <string name="extracted_text_label">የተነበበ ጽሑፍ</string>
+    <string name="camera_guidance_label">የካሜራ መመሪያ</string>
+    
     <!-- Camera Flip -->
     <string name="flip_camera_desc">ካሜራ ቀይር። አሁን አገልግሎት ላይ ያለው %1$s ካሜራ ነው።</string>
     <string name="camera_front">የፊት</string>
@@ -43,8 +49,10 @@
     <string name="permission_dialog_dismiss">ዝጋ</string>
     
     <string name="settings_button_desc">የኤፒአይ ማስተካከያ</string>
-    <string name="settings_dialog_title">የምርኩዝ ቪዥን ኤፒአይ አድራሻ</string>
-    <string name="settings_dialog_subtitle">ከአካባቢ ተለዋዋጭ (VISION_API_URL) የተዋቀረ፦</string>
+    <string name="settings_dialog_title">የምርኩዝ ቪዥን ኤፒአይ አድራሻዎች</string>
+    <string name="settings_dialog_subtitle">ከአካባቢ ተለዋዋጮች የተዋቀሩ ኤፒአይዎች፦</string>
+    <string name="vision_endpoint_label">ዙሪያውን የማስረዳት ኤፒአይ</string>
+    <string name="read_text_endpoint_label">ጽሑፍ የማንበብ ኤፒአይ</string>
     <string name="voice_selector_label">የድምፅ ምርጫ</string>
     <string name="save_button">አስቀምጥ</string>
     <string name="cancel_button">ሰርዝ</string>
