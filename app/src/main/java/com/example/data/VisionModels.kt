@@ -2,6 +2,11 @@ package com.example.data
 
 import org.json.JSONObject
 
+data class ConversationTurn(
+    val role: String,
+    val text: String
+)
+
 data class VisionAudioData(
     val audioBase64: String?,
     val audioUrl: String?,

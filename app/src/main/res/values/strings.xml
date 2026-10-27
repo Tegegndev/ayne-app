@@ -71,4 +71,14 @@
     <!-- Accessibility Labels -->
     <string name="logo_desc">Ayne logo: walking person with cane</string>
     <string name="language_selector_desc">Language selector. Currently selected %1$s.</string>
+
+    <!-- Multi-Turn Visual Follow-Up -->
+    <string name="no_scene_in_memory">No active scene in memory. Press Volume+ or Describe Surroundings first to take a picture.</string>
+    <string name="recording_voice_prompt">Listening… Speak your follow-up question. Tap or press Volume- to submit.</string>
+    <string name="recording_voice_active">Microphone recording active</string>
+    <string name="scene_locked_badge">Scene locked · %1$d follow-ups</string>
+    <string name="scene_locked_initial">Scene locked · Ready for follow-up</string>
+    <string name="clear_scene_button">New Scene</string>
+    <string name="clear_scene_desc">Clear active scene and reset conversation history</string>
+    <string name="analyzing_followup">Analyzing follow-up question on active scene…</string>
 </resources>

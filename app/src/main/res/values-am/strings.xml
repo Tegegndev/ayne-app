@@ -64,4 +64,14 @@
     
     <string name="logo_desc">የአይኔ አርማ፡ በዱላ የሚጓዝ ሰው</string>
     <string name="language_selector_desc">የቋንቋ መምረጫ። የተመረጠው %1$s።</string>
+
+    <!-- Multi-Turn Visual Follow-Up -->
+    <string name="no_scene_in_memory">ምንም የተቀመጠ ምስል የለም፤ መጀመሪያ ድምጽ + ቁልፍን ወይም ዙሪያውን አስረዳን ይጫኑ።</string>
+    <string name="recording_voice_prompt">እያዳመጠ ነው… ተከታይ ጥያቄዎን ይናገሩ። ለመጨረስ ድምጽ - ወይም ማያ ገጹን ይጫኑ።</string>
+    <string name="recording_voice_active">የማይክሮፎን ድምፅ ቅጂ በርቷል</string>
+    <string name="scene_locked_badge">ምስል ተይዟል · %1$d ተከታታይ ጥያቄዎች</string>
+    <string name="scene_locked_initial">ምስል ተይዟል · ለተከታይ ጥያቄ ዝግጁ</string>
+    <string name="clear_scene_button">አዲስ ምስል</string>
+    <string name="clear_scene_desc">የተያዘውን ምስልና የውይይት ታሪክ ያጽዱ</string>
+    <string name="analyzing_followup">በተያዘው ምስል ላይ የቀረበውን ተከታይ ጥያቄ እያጠና ነው…</string>
 </resources>

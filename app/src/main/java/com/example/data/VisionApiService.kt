@@ -28,6 +28,8 @@ class VisionApiService(
         endpointUrl: String,
         imageBase64: String,
         audioBase64: String? = null,
+        query: String? = null,
+        history: List<ConversationTurn> = emptyList(),
         customVoice: String = "am-hamen",
         mode: String = "general",
         includeAudio: Boolean = true
@@ -38,9 +40,21 @@ class VisionApiService(
                 if (!audioBase64.isNullOrBlank()) {
                     put("audioBase64", audioBase64)
                 }
+                if (!query.isNullOrBlank()) {
+                    put("query", query)
+                }
                 put("customVoice", customVoice)
                 put("mode", mode)
                 put("includeAudio", includeAudio)
+
+                val historyArray = org.json.JSONArray()
+                history.forEach { turn ->
+                    historyArray.put(JSONObject().apply {
+                        put("role", turn.role)
+                        put("text", turn.text)
+                    })
+                }
+                put("history", historyArray)
             }
 
             val mediaType = "application/json; charset=utf-8".toMediaType()
@@ -79,6 +93,9 @@ class VisionApiService(
     suspend fun seeAndDescribeStream(
         baseEndpointUrl: String,
         imageBase64: String,
+        audioBase64: String? = null,
+        query: String? = null,
+        history: List<ConversationTurn> = emptyList(),
         customVoice: String = "am-hamen",
         mode: String = "general",
         onVision: (StreamVisionEvent) -> Unit,
@@ -96,9 +113,24 @@ class VisionApiService(
 
             val jsonPayload = JSONObject().apply {
                 put("imageBase64", imageBase64)
+                if (!audioBase64.isNullOrBlank()) {
+                    put("audioBase64", audioBase64)
+                }
+                if (!query.isNullOrBlank()) {
+                    put("query", query)
+                }
                 put("customVoice", customVoice)
                 put("mode", mode)
                 put("includeAudio", true)
+
+                val historyArray = org.json.JSONArray()
+                history.forEach { turn ->
+                    historyArray.put(JSONObject().apply {
+                        put("role", turn.role)
+                        put("text", turn.text)
+                    })
+                }
+                put("history", historyArray)
             }
 
             val mediaType = "application/json; charset=utf-8".toMediaType()

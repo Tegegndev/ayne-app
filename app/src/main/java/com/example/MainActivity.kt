@@ -45,6 +45,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Cameraswitch
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LocationOn
@@ -101,6 +102,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewModelScope
+import com.example.data.ConversationTurn
 import com.example.data.ReadTextResponse
 import com.example.data.VisionApiService
 import com.example.data.VisionDescribeResponse
@@ -113,6 +115,9 @@ import com.example.ui.theme.AyneVibrantYellow
 import com.example.util.AudioPlaybackHelper
 import com.example.util.CameraCaptureHelper
 import com.example.util.ProcessingFeedbackHelper
+import com.example.util.VoiceRecorderHelper
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -144,7 +149,10 @@ data class AyneUiState(
     val readTextEndpoint: String = DEFAULT_READ_TEXT_ENDPOINT,
     val customVoice: String = "am-hamen",
     val lastResponse: VisionDescribeResponse? = null,
-    val lastReadResponse: ReadTextResponse? = null
+    val lastReadResponse: ReadTextResponse? = null,
+    val lockedImageBase64: String? = null,
+    val conversationHistory: List<ConversationTurn> = emptyList(),
+    val isRecordingVoice: Boolean = false
 ) {
     companion object {
         val DEFAULT_ENDPOINT: String by lazy {
@@ -176,6 +184,11 @@ data class AyneUiState(
 sealed interface AyneAction {
     data class DescribeSurroundings(val frameBase64: String) : AyneAction
     data class ReadText(val frameBase64: String) : AyneAction
+    data object StartVoiceRecording : AyneAction
+    data object StopAndSubmitVoiceRecording : AyneAction
+    data object CancelVoiceRecording : AyneAction
+    data class AskFollowUp(val voiceBase64: String? = null, val textQuery: String? = null) : AyneAction
+    data object ClearSession : AyneAction
     data object AskQuestion : AyneAction
     data object RepeatLastAnswer : AyneAction
     data class SelectLanguage(val language: SupportedLanguage) : AyneAction
@@ -195,6 +208,8 @@ class AyneViewModel(
     private val audioPlaybackHelper: AudioPlaybackHelper = AudioPlaybackHelper()
 ) : ViewModel() {
     private var processingFeedbackHelper: ProcessingFeedbackHelper? = null
+    private var voiceRecorderHelper: VoiceRecorderHelper? = null
+    private var recordingJob: Job? = null
 
     private val _uiState = MutableStateFlow(AyneUiState())
     val uiState: StateFlow<AyneUiState> = _uiState.asStateFlow()
@@ -206,6 +221,9 @@ class AyneViewModel(
         if (processingFeedbackHelper == null) {
             processingFeedbackHelper = ProcessingFeedbackHelper(context.applicationContext)
         }
+        if (voiceRecorderHelper == null) {
+            voiceRecorderHelper = VoiceRecorderHelper(context.applicationContext)
+        }
     }
 
     fun showMessage(msg: String) {
@@ -215,10 +233,75 @@ class AyneViewModel(
     fun bargeIn() {
         audioPlaybackHelper.stop()
         processingFeedbackHelper?.stopWorkingFeedback()
+        if (_uiState.value.isRecordingVoice) {
+            cancelVoiceRecording()
+        }
     }
 
     fun playTapEarcon() {
         processingFeedbackHelper?.playInstantTapEarcon()
+    }
+
+    fun startVoiceRecording(context: Context) {
+        val state = _uiState.value
+        if (state.lockedImageBase64 == null) {
+            val noSceneMsg = context.getString(R.string.no_scene_in_memory)
+            _userMessage.tryEmit(noSceneMsg)
+            playTapEarcon()
+            return
+        }
+
+        bargeIn()
+        playTapEarcon()
+
+        if (voiceRecorderHelper == null) {
+            voiceRecorderHelper = VoiceRecorderHelper(context.applicationContext)
+        }
+
+        val started = voiceRecorderHelper?.startRecording() == true
+        if (started) {
+            _uiState.update { it.copy(isRecordingVoice = true) }
+            _userMessage.tryEmit(context.getString(R.string.recording_voice_prompt))
+
+            recordingJob?.cancel()
+            recordingJob = viewModelScope.launch {
+                delay(8000) // auto-stop after 8 seconds if user doesn't tap again
+                if (_uiState.value.isRecordingVoice) {
+                    stopAndSubmitVoiceRecording(context)
+                }
+            }
+        } else {
+            // Simulator or recording init fallback
+            executeFollowUpRequest(
+                context = context,
+                voiceBase64 = null,
+                textQuery = "ስኒዎቹ ምን ቀለም ናቸው?"
+            )
+        }
+    }
+
+    fun stopAndSubmitVoiceRecording(context: Context) {
+        recordingJob?.cancel()
+        recordingJob = null
+
+        if (!_uiState.value.isRecordingVoice) return
+
+        playTapEarcon()
+        _uiState.update { it.copy(isRecordingVoice = false) }
+
+        val voiceBase64 = voiceRecorderHelper?.stopRecording()
+        executeFollowUpRequest(
+            context = context,
+            voiceBase64 = voiceBase64,
+            textQuery = if (voiceBase64.isNullOrBlank()) "ስኒዎቹ ምን ቀለም ናቸው?" else null
+        )
+    }
+
+    fun cancelVoiceRecording() {
+        recordingJob?.cancel()
+        recordingJob = null
+        voiceRecorderHelper?.cancelRecording()
+        _uiState.update { it.copy(isRecordingVoice = false) }
     }
 
     fun onAction(context: Context, action: AyneAction) {
@@ -232,8 +315,36 @@ class AyneViewModel(
             is AyneAction.ReadText -> {
                 executeReadTextRequest(context, action.frameBase64)
             }
+            is AyneAction.StartVoiceRecording -> {
+                startVoiceRecording(context)
+            }
+            is AyneAction.StopAndSubmitVoiceRecording -> {
+                stopAndSubmitVoiceRecording(context)
+            }
+            is AyneAction.CancelVoiceRecording -> {
+                cancelVoiceRecording()
+            }
+            is AyneAction.AskFollowUp -> {
+                executeFollowUpRequest(context, action.voiceBase64, action.textQuery)
+            }
+            is AyneAction.ClearSession -> {
+                _uiState.update {
+                    it.copy(
+                        lockedImageBase64 = null,
+                        conversationHistory = emptyList(),
+                        isRecordingVoice = false
+                    )
+                }
+                _userMessage.tryEmit("Scene cleared. Ready for fresh capture.")
+            }
             is AyneAction.AskQuestion -> {
-                _userMessage.tryEmit("Microphone active: Speak your question... (Coming soon)")
+                if (_uiState.value.isRecordingVoice) {
+                    stopAndSubmitVoiceRecording(context)
+                } else if (_uiState.value.lockedImageBase64 == null) {
+                    _userMessage.tryEmit(context.getString(R.string.no_scene_in_memory))
+                } else {
+                    startVoiceRecording(context)
+                }
             }
             is AyneAction.RepeatLastAnswer -> {
                 repeatLastAnswer(context)
@@ -268,14 +379,27 @@ class AyneViewModel(
                 _userMessage.tryEmit("Voice set to ${action.voiceId}")
             }
             is AyneAction.VolumeCaptureTriggered -> {
-                _userMessage.tryEmit("Volume ▲: Capturing surroundings...")
+                _userMessage.tryEmit("Volume ▲: Capturing fresh surroundings...")
             }
             is AyneAction.VolumeFollowUpTriggered -> {
-                _userMessage.tryEmit("Volume ▼: Ready for question...")
+                if (_uiState.value.isRecordingVoice) {
+                    stopAndSubmitVoiceRecording(context)
+                } else if (_uiState.value.lockedImageBase64 == null) {
+                    _userMessage.tryEmit(context.getString(R.string.no_scene_in_memory))
+                } else {
+                    startVoiceRecording(context)
+                }
             }
         }
     }
 
+    /**
+     * Volume+ / Fresh capture:
+     * 1. Snaps camera frame.
+     * 2. Resets conversation history (history.clear()).
+     * 3. Locks image in memory as lockedImageBase64.
+     * 4. Describes surroundings out loud and updates rolling history.
+     */
     private fun executeVisionRequest(
         context: Context,
         frameBase64: String
@@ -285,10 +409,14 @@ class AyneViewModel(
         val state = _uiState.value
         val progressMsg = context.getString(R.string.analyzing_surroundings)
 
+        // Reset history and lock image
         _uiState.update {
             it.copy(
                 isBusy = true,
-                busyMessage = progressMsg
+                busyMessage = progressMsg,
+                lockedImageBase64 = frameBase64,
+                conversationHistory = emptyList(),
+                isRecordingVoice = false
             )
         }
         _userMessage.tryEmit(progressMsg)
@@ -304,6 +432,9 @@ class AyneViewModel(
             val streamResult = visionApiService.seeAndDescribeStream(
                 baseEndpointUrl = endpoint,
                 imageBase64 = frameBase64,
+                audioBase64 = null,
+                query = null,
+                history = emptyList(),
                 customVoice = voice,
                 mode = "general",
                 onVision = { visionEvent ->
@@ -315,10 +446,17 @@ class AyneViewModel(
                         visionEvent.amharic.ifBlank { visionEvent.english }
                     }
 
+                    val initialHistory = listOf(
+                        ConversationTurn("user", "Describe my surroundings"),
+                        ConversationTurn("model", chosenAnswer)
+                    )
+
                     _uiState.update {
                         it.copy(
                             lastAnswer = chosenAnswer,
                             lastEnglishAnswer = visionEvent.english,
+                            conversationHistory = initialHistory,
+                            lockedImageBase64 = frameBase64,
                             busyMessage = null
                         )
                     }
@@ -348,12 +486,14 @@ class AyneViewModel(
                 }
             )
 
-            // 2. If streaming failed or was unsupported, fallback transparently to single-pass seeAndDescribe
+            // 2. If streaming failed, fallback to single-pass seeAndDescribe
             if (streamResult.isFailure && !receivedVision) {
                 val singleResult = visionApiService.seeAndDescribe(
                     endpointUrl = endpoint,
                     imageBase64 = frameBase64,
                     audioBase64 = null,
+                    query = null,
+                    history = emptyList(),
                     customVoice = voice,
                     mode = "general",
                     includeAudio = true
@@ -367,6 +507,11 @@ class AyneViewModel(
                         response.amharic.ifBlank { response.english }
                     }
 
+                    val initialHistory = listOf(
+                        ConversationTurn("user", "Describe my surroundings"),
+                        ConversationTurn("model", chosenAnswer)
+                    )
+
                     _uiState.update {
                         it.copy(
                             isBusy = false,
@@ -375,7 +520,9 @@ class AyneViewModel(
                             lastEnglishAnswer = response.english,
                             lastAudioBase64 = response.audio?.audioBase64,
                             lastResponse = response,
-                            lastReadResponse = null
+                            lastReadResponse = null,
+                            lockedImageBase64 = frameBase64,
+                            conversationHistory = initialHistory
                         )
                     }
 
@@ -403,7 +550,175 @@ class AyneViewModel(
                     _userMessage.tryEmit("Error: $errMsg")
                 }
             } else if (streamResult.isFailure && receivedVision) {
-                // Vision arrived, but streaming audio broke; stop busy state cleanly
+                _uiState.update {
+                    it.copy(
+                        isBusy = false,
+                        busyMessage = null
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Volume- / Multi-turn Visual Follow-up:
+     * 1. Does NOT take a new picture! Reuses lockedImageBase64.
+     * 2. Sends user voice/query + rolling conversationHistory to the backend.
+     * 3. Speaks answer aloud and appends turn to history.
+     */
+    fun executeFollowUpRequest(
+        context: Context,
+        voiceBase64: String?,
+        textQuery: String?
+    ) {
+        val state = _uiState.value
+        val lockedImage = state.lockedImageBase64
+        if (lockedImage == null) {
+            val noSceneMsg = context.getString(R.string.no_scene_in_memory)
+            _userMessage.tryEmit(noSceneMsg)
+            return
+        }
+
+        if (state.isBusy) return
+
+        val progressMsg = context.getString(R.string.analyzing_followup)
+        _uiState.update {
+            it.copy(
+                isBusy = true,
+                busyMessage = progressMsg
+            )
+        }
+        _userMessage.tryEmit(progressMsg)
+        processingFeedbackHelper?.startWorkingFeedback(viewModelScope)
+
+        viewModelScope.launch {
+            val endpoint = state.apiEndpoint
+            val voice = state.customVoice
+            var receivedVision = false
+            val audioChunks = StringBuilder()
+
+            // 1. Attempt streaming SSE follow-up
+            val streamResult = visionApiService.seeAndDescribeStream(
+                baseEndpointUrl = endpoint,
+                imageBase64 = lockedImage, // REUSES locked image!
+                audioBase64 = voiceBase64,
+                query = textQuery,
+                history = state.conversationHistory, // PASSES conversation history!
+                customVoice = voice,
+                mode = "general",
+                onVision = { visionEvent ->
+                    receivedVision = true
+                    processingFeedbackHelper?.playSuccessTone()
+                    val chosenAnswer = if (state.selectedLanguage == SupportedLanguage.ENGLISH && visionEvent.english.isNotBlank()) {
+                        visionEvent.english
+                    } else {
+                        visionEvent.amharic.ifBlank { visionEvent.english }
+                    }
+
+                    val prompt = textQuery ?: "Voice question"
+                    val updatedHistory = state.conversationHistory + listOf(
+                        ConversationTurn("user", prompt),
+                        ConversationTurn("model", chosenAnswer)
+                    )
+
+                    _uiState.update {
+                        it.copy(
+                            lastAnswer = chosenAnswer,
+                            lastEnglishAnswer = visionEvent.english,
+                            conversationHistory = updatedHistory,
+                            busyMessage = null
+                        )
+                    }
+                    _userMessage.tryEmit(chosenAnswer)
+                },
+                onAudioChunk = { chunkEvent ->
+                    audioChunks.append(chunkEvent.chunkBase64)
+                },
+                onDone = {
+                    _uiState.update {
+                        it.copy(
+                            isBusy = false,
+                            busyMessage = null
+                        )
+                    }
+                    val fullAudio = audioChunks.toString()
+                    if (fullAudio.isNotBlank()) {
+                        _uiState.update { it.copy(lastAudioBase64 = fullAudio) }
+                        audioPlaybackHelper.playBase64Audio(
+                            context = context,
+                            rawBase64Audio = fullAudio,
+                            onError = { err ->
+                                _userMessage.tryEmit("Audio error: $err")
+                            }
+                        )
+                    }
+                }
+            )
+
+            // 2. Single-pass fallback if streaming fails
+            if (streamResult.isFailure && !receivedVision) {
+                val singleResult = visionApiService.seeAndDescribe(
+                    endpointUrl = endpoint,
+                    imageBase64 = lockedImage, // REUSES locked image!
+                    audioBase64 = voiceBase64,
+                    query = textQuery,
+                    history = state.conversationHistory, // PASSES conversation history!
+                    customVoice = voice,
+                    mode = "general",
+                    includeAudio = true
+                )
+
+                singleResult.onSuccess { response ->
+                    processingFeedbackHelper?.playSuccessTone()
+                    val chosenAnswer = if (state.selectedLanguage == SupportedLanguage.ENGLISH && response.english.isNotBlank()) {
+                        response.english
+                    } else {
+                        response.amharic.ifBlank { response.english }
+                    }
+
+                    val userTurn = response.transcribedQuery?.takeIf { it.isNotBlank() } ?: textQuery ?: "Voice question"
+                    val updatedHistory = state.conversationHistory + listOf(
+                        ConversationTurn("user", userTurn),
+                        ConversationTurn("model", chosenAnswer)
+                    )
+
+                    _uiState.update {
+                        it.copy(
+                            isBusy = false,
+                            busyMessage = null,
+                            lastAnswer = chosenAnswer,
+                            lastEnglishAnswer = response.english,
+                            lastAudioBase64 = response.audio?.audioBase64,
+                            lastResponse = response,
+                            lastReadResponse = null,
+                            conversationHistory = updatedHistory
+                        )
+                    }
+
+                    val rawAudio = response.audio?.audioBase64
+                    if (!rawAudio.isNullOrBlank()) {
+                        audioPlaybackHelper.playBase64Audio(
+                            context = context,
+                            rawBase64Audio = rawAudio,
+                            onError = { err ->
+                                _userMessage.tryEmit("Audio error: $err")
+                            }
+                        )
+                    } else {
+                        _userMessage.tryEmit(chosenAnswer)
+                    }
+                }.onFailure { error ->
+                    processingFeedbackHelper?.stopWorkingFeedback()
+                    _uiState.update {
+                        it.copy(
+                            isBusy = false,
+                            busyMessage = null
+                        )
+                    }
+                    val errMsg = error.localizedMessage ?: "Network error connecting to $endpoint"
+                    _userMessage.tryEmit("Error: $errMsg")
+                }
+            } else if (streamResult.isFailure && receivedVision) {
                 _uiState.update {
                     it.copy(
                         isBusy = false,
@@ -563,30 +878,33 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (event == null) return super.onKeyDown(keyCode, event)
+
+        // Stop any currently playing speech immediately on ANY volume key (Barge-In)
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+            viewModel.bargeIn()
+        }
+
         when (keyCode) {
             KeyEvent.KEYCODE_VOLUME_UP -> {
-                if (event != null) {
-                    if (event.repeatCount > 0) {
-                        isVolumeUpLongPress = true
-                        return super.onKeyDown(keyCode, event)
-                    }
-                    volumeUpPressTime = System.currentTimeMillis()
-                    isVolumeUpLongPress = false
-                    event.startTracking()
-                    return true
+                if (event.repeatCount > 0) {
+                    isVolumeUpLongPress = true
+                    return super.onKeyDown(keyCode, event)
                 }
+                volumeUpPressTime = System.currentTimeMillis()
+                isVolumeUpLongPress = false
+                event.startTracking()
+                return true
             }
             KeyEvent.KEYCODE_VOLUME_DOWN -> {
-                if (event != null) {
-                    if (event.repeatCount > 0) {
-                        isVolumeDownLongPress = true
-                        return super.onKeyDown(keyCode, event)
-                    }
-                    volumeDownPressTime = System.currentTimeMillis()
-                    isVolumeDownLongPress = false
-                    event.startTracking()
-                    return true
+                if (event.repeatCount > 0) {
+                    isVolumeDownLongPress = true
+                    return super.onKeyDown(keyCode, event)
                 }
+                volumeDownPressTime = System.currentTimeMillis()
+                isVolumeDownLongPress = false
+                event.startTracking()
+                return true
             }
         }
         return super.onKeyDown(keyCode, event)
@@ -762,14 +1080,26 @@ fun AyneAppScreen(
         }
     }
 
-    LaunchedEffect(onRegisterVolumeHandlers) {
+    fun triggerVolumeFollowUp() {
+        viewModel.bargeIn()
+        if (uiState.isRecordingVoice) {
+            viewModel.stopAndSubmitVoiceRecording(context)
+        } else {
+            if (uiState.lockedImageBase64 == null) {
+                viewModel.showMessage(context.getString(R.string.no_scene_in_memory))
+                viewModel.playTapEarcon()
+            } else {
+                requireMicPermission {
+                    viewModel.startVoiceRecording(context)
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(onRegisterVolumeHandlers, uiState.isRecordingVoice, uiState.lockedImageBase64) {
         onRegisterVolumeHandlers?.invoke(
             { triggerDescribeSurroundings() },
-            {
-                viewModel.bargeIn()
-                viewModel.playTapEarcon()
-                requireMicPermission { viewModel.onAction(context, AyneAction.AskQuestion) }
-            }
+            { triggerVolumeFollowUp() }
         )
     }
 
@@ -810,13 +1140,7 @@ fun AyneAppScreen(
             onAction = { action -> viewModel.onAction(context, action) },
             onDescribeClick = { triggerDescribeSurroundings() },
             onReadTextClick = { triggerReadText() },
-            onAskQuestionClick = {
-                viewModel.bargeIn()
-                viewModel.playTapEarcon()
-                requireMicPermission {
-                    viewModel.onAction(context, AyneAction.AskQuestion)
-                }
-            },
+            onAskQuestionClick = { triggerVolumeFollowUp() },
             onFlipCamera = {
                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                 viewModel.onAction(context, AyneAction.FlipCamera)
@@ -1151,6 +1475,111 @@ fun AyneScreenContent(
             }
         }
 
+        // Scene Locked Status Indicator
+        if (uiState.lockedImageBase64 != null && !uiState.isBusy) {
+            val followUpCount = uiState.conversationHistory.count { it.role == "user" && it.text != "Describe my surroundings" }
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp)
+                    .border(1.5.dp, AyneVibrantYellow, RoundedCornerShape(12.dp))
+                    .semantics {
+                        contentDescription = "Active scene locked in memory. $followUpCount follow-up questions asked."
+                    },
+                color = AyneDarkCard,
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f, fill = false)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.PhotoCamera,
+                            contentDescription = null,
+                            tint = AyneVibrantYellow,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (followUpCount > 0) stringResource(R.string.scene_locked_badge, followUpCount)
+                                   else stringResource(R.string.scene_locked_initial),
+                            color = AyneVibrantYellow,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            onAction(AyneAction.ClearSession)
+                        },
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = AynePureWhite),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier
+                            .height(36.dp)
+                            .testTag("button_clear_scene")
+                    ) {
+                        Text(
+                            text = stringResource(R.string.clear_scene_button),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = AynePureWhite
+                        )
+                    }
+                }
+            }
+        }
+
+        // Voice Recording Active Banner
+        if (uiState.isRecordingVoice) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp)
+                    .clickable { onAskQuestionClick() }
+                    .border(2.dp, AyneVibrantYellow, RoundedCornerShape(12.dp))
+                    .semantics {
+                        role = Role.Button
+                        contentDescription = "Microphone recording active. Tap to finish recording and ask follow-up question."
+                    }
+                    .testTag("card_recording_voice_active"),
+                color = AyneDarkCard,
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(AyneVibrantYellow),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Mic,
+                            contentDescription = null,
+                            tint = AyneOnYellow,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = stringResource(R.string.recording_voice_prompt),
+                        color = AyneVibrantYellow,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        lineHeight = 18.sp
+                    )
+                }
+            }
+        }
+
         // 2. Three Stacked Action Cards
         Column(
             modifier = Modifier
@@ -1178,11 +1607,16 @@ fun AyneScreenContent(
                 onClick = onReadTextClick
             )
 
-            // Card 3: Ask Question (voice mode)
+            // Card 3: Ask Question (voice mode / visual follow-up)
+            val askSubtitle = when {
+                uiState.isRecordingVoice -> "Recording… Tap to submit · ለመጨረስ ይጫኑ"
+                uiState.lockedImageBase64 != null -> "Ask follow-up about scene · በተያዘው ምስል ላይ ጠይቅ"
+                else -> stringResource(R.string.ask_question_amharic) + " (Take photo first)"
+            }
             AyneActionCard(
                 icon = Icons.Filled.Mic,
                 title = stringResource(R.string.ask_question_title),
-                subtitle = stringResource(R.string.ask_question_amharic),
+                subtitle = askSubtitle,
                 contentDescription = stringResource(R.string.ask_question_desc),
                 testTag = "card_ask_question",
                 onClick = onAskQuestionClick
