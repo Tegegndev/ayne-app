@@ -114,6 +114,8 @@ import com.example.data.cleanLabelPrefix
 import com.example.data.ReadTextResponse
 import com.example.data.VisionApiService
 import com.example.data.VisionDescribeResponse
+import com.example.ui.AfaanOromooMockScreen
+import com.example.ui.EnglishMockScreen
 import com.example.ui.theme.AyneDarkCard
 import com.example.ui.theme.AyneOnYellow
 import com.example.ui.theme.AynePureBlack
@@ -1396,19 +1398,49 @@ fun AyneAppScreen(
             }
         }
     ) { innerPadding ->
-        AyneScreenContent(
-            uiState = uiState,
-            onAction = { action -> viewModel.onAction(context, action) },
-            onDescribeClick = { triggerDescribeSurroundings() },
-            onReadTextClick = { triggerReadText() },
-            onAskQuestionClick = { triggerVolumeFollowUp() },
-            onFlipCamera = {
-                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                viewModel.onAction(context, AyneAction.FlipCamera)
-            },
-            onSettingsClick = { showSettingsDialog = true },
-            modifier = Modifier.padding(innerPadding)
-        )
+        when (uiState.selectedLanguage) {
+            SupportedLanguage.ENGLISH -> {
+                EnglishMockScreen(
+                    isFrontCamera = uiState.isFrontCamera,
+                    onAction = { action -> viewModel.onAction(context, action) },
+                    onLanguageSelected = { lang -> viewModel.onAction(context, AyneAction.SelectLanguage(lang)) },
+                    onFlipCamera = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        viewModel.onAction(context, AyneAction.FlipCamera)
+                    },
+                    onSettingsClick = { showSettingsDialog = true },
+                    modifier = Modifier.padding(innerPadding)
+                )
+            }
+            SupportedLanguage.AFAN_OROMOO -> {
+                AfaanOromooMockScreen(
+                    isFrontCamera = uiState.isFrontCamera,
+                    onAction = { action -> viewModel.onAction(context, action) },
+                    onLanguageSelected = { lang -> viewModel.onAction(context, AyneAction.SelectLanguage(lang)) },
+                    onFlipCamera = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        viewModel.onAction(context, AyneAction.FlipCamera)
+                    },
+                    onSettingsClick = { showSettingsDialog = true },
+                    modifier = Modifier.padding(innerPadding)
+                )
+            }
+            SupportedLanguage.AMHARIC -> {
+                AyneScreenContent(
+                    uiState = uiState,
+                    onAction = { action -> viewModel.onAction(context, action) },
+                    onDescribeClick = { triggerDescribeSurroundings() },
+                    onReadTextClick = { triggerReadText() },
+                    onAskQuestionClick = { triggerVolumeFollowUp() },
+                    onFlipCamera = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        viewModel.onAction(context, AyneAction.FlipCamera)
+                    },
+                    onSettingsClick = { showSettingsDialog = true },
+                    modifier = Modifier.padding(innerPadding)
+                )
+            }
+        }
 
         if (showSettingsDialog) {
             VisionSettingsDialog(
