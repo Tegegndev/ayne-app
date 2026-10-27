@@ -22,7 +22,7 @@
     <string name="volume_hint_capture">capture</string>
     <string name="volume_hint_followup">follow-up</string>
     
-    <!-- Feedback Messages -->
+    <!-- Feedback & Status Messages -->
     <string name="snackbar_coming_soon">Coming soon — backend not connected</string>
     <string name="snackbar_no_answer">No answer yet</string>
     <string name="camera_permission_granted">Camera permission granted. Ready to scan.</string>
@@ -30,9 +30,22 @@
     <string name="mic_permission_granted">Microphone permission granted. Ready to listen.</string>
     <string name="mic_permission_denied">Microphone permission is required to ask questions by voice. Please grant microphone access.</string>
     
+    <string name="analyzing_surroundings">Analyzing surroundings... Please hold steady.</string>
+    <string name="reading_text_progress">Reading text in view... Please hold steady.</string>
+    
+    <!-- Permission Dialog -->
     <string name="permission_dialog_title">Permission Required</string>
     <string name="permission_dialog_open_settings">Open Settings</string>
     <string name="permission_dialog_dismiss">Dismiss</string>
+    
+    <!-- Settings Dialog -->
+    <string name="settings_button_desc">API endpoint settings</string>
+    <string name="settings_dialog_title">Vision API Endpoint</string>
+    <string name="settings_dialog_subtitle">Endpoint configured from VISION_API_URL environment variable:</string>
+    <string name="voice_selector_label">Voice Selection</string>
+    <string name="save_button">Save</string>
+    <string name="cancel_button">Cancel</string>
+    <string name="reset_default">Reset Default</string>
     
     <!-- Languages -->
     <string name="language_amharic">አማርኛ</string>

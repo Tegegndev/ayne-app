@@ -27,9 +27,20 @@
     <string name="mic_permission_granted">የማይክሮፎን ፈቃድ ተሰጥቷል። ለመስማት ዝግጁ ነው።</string>
     <string name="mic_permission_denied">በድምፅ ጥያቄ ለመጠየቅ የማይክሮፎን ፈቃድ ያስፈልጋል። እባክዎን ፈቃድ ይስጡ።</string>
     
+    <string name="analyzing_surroundings">ዙሪያውን እያጠና ነው... እባክዎን ካሜራውን ሳያንቀሳቅሱ ያቆዩ።</string>
+    <string name="reading_text_progress">ጽሑፉን እያነበበ ነው... እባክዎን ሳያንቀሳቅሱ ያቆዩ።</string>
+    
     <string name="permission_dialog_title">ፈቃድ ያስፈልጋል</string>
     <string name="permission_dialog_open_settings">ማስተካከያ ክፈት</string>
     <string name="permission_dialog_dismiss">ዝጋ</string>
+    
+    <string name="settings_button_desc">የኤፒአይ ማስተካከያ</string>
+    <string name="settings_dialog_title">የምርኩዝ ቪዥን ኤፒአይ አድራሻ</string>
+    <string name="settings_dialog_subtitle">ከአካባቢ ተለዋዋጭ (VISION_API_URL) የተዋቀረ፦</string>
+    <string name="voice_selector_label">የድምፅ ምርጫ</string>
+    <string name="save_button">አስቀምጥ</string>
+    <string name="cancel_button">ሰርዝ</string>
+    <string name="reset_default">ወደ ቀድሞው መልስ</string>
     
     <string name="language_amharic">አማርኛ</string>
     <string name="language_oromo">Afaan Oromoo</string>
