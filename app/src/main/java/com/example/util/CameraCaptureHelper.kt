@@ -80,7 +80,7 @@ object CameraCaptureHelper {
         return resizeAndEncodeBase64(bitmap)
     }
 
-    fun resizeAndEncodeBase64(sourceBitmap: Bitmap, maxDimension: Int = 800, quality: Int = 72): String {
+    fun resizeAndEncodeBase64(sourceBitmap: Bitmap, maxDimension: Int = 800, quality: Int = 60): String {
         val width = sourceBitmap.width
         val height = sourceBitmap.height
 
@@ -133,6 +133,6 @@ object CameraCaptureHelper {
         val mugPaint = Paint().apply { color = Color.rgb(255, 214, 0) }
         canvas.drawCircle(110f, 360f, 40f, mugPaint)
 
-        return resizeAndEncodeBase64(bitmap, 800, 72)
+        return resizeAndEncodeBase64(bitmap, 800, 60)
     }
 }
