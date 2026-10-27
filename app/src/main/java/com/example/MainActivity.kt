@@ -20,6 +20,10 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.util.Base64
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -81,8 +85,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
@@ -151,6 +157,7 @@ data class AyneUiState(
     val lastResponse: VisionDescribeResponse? = null,
     val lastReadResponse: ReadTextResponse? = null,
     val lockedImageBase64: String? = null,
+    val lastCapturedBase64: String? = null,
     val conversationHistory: List<ConversationTurn> = emptyList(),
     val isRecordingVoice: Boolean = false
 ) {
@@ -331,6 +338,7 @@ class AyneViewModel(
                 _uiState.update {
                     it.copy(
                         lockedImageBase64 = null,
+                        lastCapturedBase64 = null,
                         conversationHistory = emptyList(),
                         isRecordingVoice = false
                     )
@@ -415,6 +423,7 @@ class AyneViewModel(
                 isBusy = true,
                 busyMessage = progressMsg,
                 lockedImageBase64 = frameBase64,
+                lastCapturedBase64 = frameBase64,
                 conversationHistory = emptyList(),
                 isRecordingVoice = false
             )
@@ -741,7 +750,8 @@ class AyneViewModel(
         _uiState.update {
             it.copy(
                 isBusy = true,
-                busyMessage = progressMsg
+                busyMessage = progressMsg,
+                lastCapturedBase64 = frameBase64
             )
         }
         _userMessage.tryEmit(progressMsg)
@@ -1475,8 +1485,22 @@ fun AyneScreenContent(
             }
         }
 
-        // Scene Locked Status Indicator
-        if (uiState.lockedImageBase64 != null && !uiState.isBusy) {
+        // Captured Frame Debug Preview & Scene Status Indicator
+        val previewBase64 = uiState.lockedImageBase64 ?: uiState.lastCapturedBase64
+        val previewBitmap: Bitmap? = remember(previewBase64) {
+            previewBase64?.let { b64 ->
+                try {
+                    val bytes = Base64.decode(b64, Base64.DEFAULT)
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                } catch (e: Throwable) {
+                    null
+                }
+            }
+        }
+        var showFullPreviewDialog by remember { mutableStateOf(false) }
+
+        if (previewBitmap != null && !uiState.isBusy) {
+            val isLocked = uiState.lockedImageBase64 != null
             val followUpCount = uiState.conversationHistory.count { it.role == "user" && it.text != "Describe my surroundings" }
             Surface(
                 modifier = Modifier
@@ -1484,54 +1508,174 @@ fun AyneScreenContent(
                     .padding(bottom = 12.dp)
                     .border(1.5.dp, AyneVibrantYellow, RoundedCornerShape(12.dp))
                     .semantics {
-                        contentDescription = "Active scene locked in memory. $followUpCount follow-up questions asked."
+                        contentDescription = "Captured camera frame debug preview. ${previewBitmap.width} by ${previewBitmap.height} pixels. Tap to inspect full image."
                     },
                 color = AyneDarkCard,
                 shape = RoundedCornerShape(12.dp)
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    modifier = Modifier.padding(10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
+                    // Clickable thumbnail with frame info
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.weight(1f, fill = false)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.PhotoCamera,
-                            contentDescription = null,
-                            tint = AyneVibrantYellow,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = if (followUpCount > 0) stringResource(R.string.scene_locked_badge, followUpCount)
-                                   else stringResource(R.string.scene_locked_initial),
-                            color = AyneVibrantYellow,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                    OutlinedButton(
-                        onClick = {
-                            onAction(AyneAction.ClearSession)
-                        },
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = AynePureWhite),
-                        shape = RoundedCornerShape(8.dp),
                         modifier = Modifier
-                            .height(36.dp)
-                            .testTag("button_clear_scene")
+                            .weight(1f, fill = false)
+                            .clickable { showFullPreviewDialog = true }
                     ) {
-                        Text(
-                            text = stringResource(R.string.clear_scene_button),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = AynePureWhite
-                        )
+                        Box(
+                            modifier = Modifier
+                                .size(54.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .border(1.5.dp, AyneVibrantYellow, RoundedCornerShape(8.dp))
+                                .background(AynePureBlack),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Image(
+                                bitmap = previewBitmap.asImageBitmap(),
+                                contentDescription = stringResource(R.string.debug_preview_desc),
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Filled.PhotoCamera,
+                                    contentDescription = null,
+                                    tint = AyneVibrantYellow,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = when {
+                                        isLocked && followUpCount > 0 -> stringResource(R.string.scene_locked_badge, followUpCount)
+                                        isLocked -> stringResource(R.string.scene_locked_initial)
+                                        else -> stringResource(R.string.debug_preview_title)
+                                    },
+                                    color = AyneVibrantYellow,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "${previewBitmap.width}×${previewBitmap.height} · ${stringResource(R.string.debug_preview_tap_to_enlarge)}",
+                                color = AynePureWhite.copy(alpha = 0.8f),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+
+                    if (isLocked) {
+                        OutlinedButton(
+                            onClick = {
+                                onAction(AyneAction.ClearSession)
+                            },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = AynePureWhite),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .height(36.dp)
+                                .testTag("button_clear_scene")
+                        ) {
+                            Text(
+                                text = stringResource(R.string.clear_scene_button),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = AynePureWhite
+                            )
+                        }
                     }
                 }
             }
+        }
+
+        // Enlarged full debug preview dialog
+        if (showFullPreviewDialog && previewBitmap != null) {
+            AlertDialog(
+                onDismissRequest = { showFullPreviewDialog = false },
+                title = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = stringResource(R.string.debug_dialog_title),
+                            color = AyneVibrantYellow,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp
+                        )
+                        IconButton(
+                            onClick = { showFullPreviewDialog = false }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Close,
+                                contentDescription = stringResource(R.string.debug_dialog_close),
+                                tint = AynePureWhite
+                            )
+                        }
+                    }
+                },
+                text = {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = AynePureBlack,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 380.dp)
+                                .border(1.5.dp, AyneVibrantYellow, RoundedCornerShape(10.dp))
+                        ) {
+                            Image(
+                                bitmap = previewBitmap.asImageBitmap(),
+                                contentDescription = stringResource(R.string.debug_preview_desc),
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "Resolution: ${previewBitmap.width} × ${previewBitmap.height} px • Compression: JPEG 65%",
+                            color = AynePureWhite.copy(alpha = 0.9f),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        val b64Len = previewBase64?.length ?: 0
+                        val approxBytes = (b64Len * 3) / 4
+                        Text(
+                            text = "Payload size: ~${approxBytes / 1024} KB • Model Vision Ready",
+                            color = AyneVibrantYellow,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = { showFullPreviewDialog = false },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AyneVibrantYellow,
+                            contentColor = AynePureBlack
+                        ),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            text = stringResource(R.string.debug_dialog_close),
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                },
+                containerColor = AyneDarkCard,
+                textContentColor = AynePureWhite
+            )
         }
 
         // Voice Recording Active Banner
