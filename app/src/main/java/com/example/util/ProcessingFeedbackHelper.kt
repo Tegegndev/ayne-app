@@ -5,6 +5,7 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
+import android.media.MediaActionSound
 import android.media.ToneGenerator
 import android.os.Build
 import android.os.VibrationEffect
@@ -24,6 +25,16 @@ class ProcessingFeedbackHelper(private val context: Context) {
     private var toneGenerator: ToneGenerator? = null
     private var audioTrack: AudioTrack? = null
     private var loopJob: Job? = null
+
+    private val mediaActionSound: MediaActionSound? by lazy {
+        try {
+            MediaActionSound().apply {
+                load(MediaActionSound.SHUTTER_CLICK)
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
 
     // Precomputed high-volume, resonant acoustic sonar pulse
     private val sampleRate = 44100
@@ -86,7 +97,40 @@ class ProcessingFeedbackHelper(private val context: Context) {
     }
 
     /**
-     * Starts a prominent, big acoustic pulse and distinct haptic feedback
+     * Instant shutter / click earcon and haptic feedback triggered immediately on button tap (0ms)
+     * so blind users have zero-latency sensory feedback before network operations commence.
+     */
+    fun playInstantTapEarcon() {
+        try {
+            mediaActionSound?.play(MediaActionSound.SHUTTER_CLICK) ?: run {
+                toneGenerator?.startTone(ToneGenerator.TONE_PROP_BEEP2, 70)
+            }
+        } catch (e: Exception) {
+            try {
+                toneGenerator?.startTone(ToneGenerator.TONE_PROP_BEEP2, 70)
+            } catch (ignored: Exception) {}
+        }
+
+        try {
+            vibrator?.let { v ->
+                if (v.hasVibrator()) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        v.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_CLICK))
+                    } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        v.vibrate(VibrationEffect.createOneShot(45, VibrationEffect.DEFAULT_AMPLITUDE))
+                    } else {
+                        @Suppress("DEPRECATION")
+                        v.vibrate(45)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            // Ignore vibration failure
+        }
+    }
+
+    /**
+     * Starts a prominent acoustic pulse and distinct haptic feedback
      * so blind and visually impaired users clearly know the app is actively working.
      */
     fun startWorkingFeedback(scope: CoroutineScope) {
@@ -98,7 +142,7 @@ class ProcessingFeedbackHelper(private val context: Context) {
         loopJob = scope.launch(Dispatchers.Default) {
             try {
                 while (isActive) {
-                    delay(1500)
+                    delay(1500) // Calm, rhythmic 1.5s interval
                     if (isActive) {
                         pulseAudioAndHaptic()
                     }
@@ -191,5 +235,11 @@ class ProcessingFeedbackHelper(private val context: Context) {
             // Ignore
         }
         toneGenerator = null
+
+        try {
+            mediaActionSound?.release()
+        } catch (e: Exception) {
+            // Ignore
+        }
     }
 }

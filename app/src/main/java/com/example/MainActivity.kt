@@ -212,7 +212,19 @@ class AyneViewModel(
         _userMessage.tryEmit(msg)
     }
 
+    fun bargeIn() {
+        audioPlaybackHelper.stop()
+        processingFeedbackHelper?.stopWorkingFeedback()
+    }
+
+    fun playTapEarcon() {
+        processingFeedbackHelper?.playInstantTapEarcon()
+    }
+
     fun onAction(context: Context, action: AyneAction) {
+        bargeIn()
+        playTapEarcon()
+
         when (action) {
             is AyneAction.DescribeSurroundings -> {
                 executeVisionRequest(context, action.frameBase64)
@@ -285,58 +297,119 @@ class AyneViewModel(
         viewModelScope.launch {
             val endpoint = state.apiEndpoint
             val voice = state.customVoice
+            var receivedVision = false
+            val audioChunks = StringBuilder()
 
-            val result = visionApiService.seeAndDescribe(
-                endpointUrl = endpoint,
+            // 1. Attempt ultra-low latency SSE streaming (~500ms vision arrival)
+            val streamResult = visionApiService.seeAndDescribeStream(
+                baseEndpointUrl = endpoint,
                 imageBase64 = frameBase64,
-                audioBase64 = null,
                 customVoice = voice,
                 mode = "general",
-                includeAudio = true
+                onVision = { visionEvent ->
+                    receivedVision = true
+                    processingFeedbackHelper?.playSuccessTone()
+                    val chosenAnswer = if (state.selectedLanguage == SupportedLanguage.ENGLISH && visionEvent.english.isNotBlank()) {
+                        visionEvent.english
+                    } else {
+                        visionEvent.amharic.ifBlank { visionEvent.english }
+                    }
+
+                    _uiState.update {
+                        it.copy(
+                            lastAnswer = chosenAnswer,
+                            lastEnglishAnswer = visionEvent.english,
+                            busyMessage = null
+                        )
+                    }
+                    _userMessage.tryEmit(chosenAnswer)
+                },
+                onAudioChunk = { chunkEvent ->
+                    audioChunks.append(chunkEvent.chunkBase64)
+                },
+                onDone = {
+                    _uiState.update {
+                        it.copy(
+                            isBusy = false,
+                            busyMessage = null
+                        )
+                    }
+                    val fullAudio = audioChunks.toString()
+                    if (fullAudio.isNotBlank()) {
+                        _uiState.update { it.copy(lastAudioBase64 = fullAudio) }
+                        audioPlaybackHelper.playBase64Audio(
+                            context = context,
+                            rawBase64Audio = fullAudio,
+                            onError = { err ->
+                                _userMessage.tryEmit("Audio error: $err")
+                            }
+                        )
+                    }
+                }
             )
 
-            result.onSuccess { response ->
-                processingFeedbackHelper?.playSuccessTone()
-                val chosenAnswer = if (state.selectedLanguage == SupportedLanguage.ENGLISH && response.english.isNotBlank()) {
-                    response.english
-                } else {
-                    response.amharic.ifBlank { response.english }
-                }
+            // 2. If streaming failed or was unsupported, fallback transparently to single-pass seeAndDescribe
+            if (streamResult.isFailure && !receivedVision) {
+                val singleResult = visionApiService.seeAndDescribe(
+                    endpointUrl = endpoint,
+                    imageBase64 = frameBase64,
+                    audioBase64 = null,
+                    customVoice = voice,
+                    mode = "general",
+                    includeAudio = true
+                )
 
-                _uiState.update {
-                    it.copy(
-                        isBusy = false,
-                        busyMessage = null,
-                        lastAnswer = chosenAnswer,
-                        lastEnglishAnswer = response.english,
-                        lastAudioBase64 = response.audio?.audioBase64,
-                        lastResponse = response,
-                        lastReadResponse = null
-                    )
-                }
+                singleResult.onSuccess { response ->
+                    processingFeedbackHelper?.playSuccessTone()
+                    val chosenAnswer = if (state.selectedLanguage == SupportedLanguage.ENGLISH && response.english.isNotBlank()) {
+                        response.english
+                    } else {
+                        response.amharic.ifBlank { response.english }
+                    }
 
-                val rawAudio = response.audio?.audioBase64
-                if (!rawAudio.isNullOrBlank()) {
-                    audioPlaybackHelper.playBase64Audio(
-                        context = context,
-                        rawBase64Audio = rawAudio,
-                        onError = { err ->
-                            _userMessage.tryEmit("Audio error: $err")
-                        }
-                    )
-                } else {
-                    _userMessage.tryEmit(chosenAnswer)
+                    _uiState.update {
+                        it.copy(
+                            isBusy = false,
+                            busyMessage = null,
+                            lastAnswer = chosenAnswer,
+                            lastEnglishAnswer = response.english,
+                            lastAudioBase64 = response.audio?.audioBase64,
+                            lastResponse = response,
+                            lastReadResponse = null
+                        )
+                    }
+
+                    val rawAudio = response.audio?.audioBase64
+                    if (!rawAudio.isNullOrBlank()) {
+                        audioPlaybackHelper.playBase64Audio(
+                            context = context,
+                            rawBase64Audio = rawAudio,
+                            onError = { err ->
+                                _userMessage.tryEmit("Audio error: $err")
+                            }
+                        )
+                    } else {
+                        _userMessage.tryEmit(chosenAnswer)
+                    }
+                }.onFailure { error ->
+                    processingFeedbackHelper?.stopWorkingFeedback()
+                    _uiState.update {
+                        it.copy(
+                            isBusy = false,
+                            busyMessage = null
+                        )
+                    }
+                    val errMsg = error.localizedMessage ?: "Network error connecting to $endpoint"
+                    _userMessage.tryEmit("Error: $errMsg")
                 }
-            }.onFailure { error ->
-                processingFeedbackHelper?.stopWorkingFeedback()
+            } else if (streamResult.isFailure && receivedVision) {
+                // Vision arrived, but streaming audio broke; stop busy state cleanly
                 _uiState.update {
                     it.copy(
                         isBusy = false,
                         busyMessage = null
                     )
                 }
-                val errMsg = error.localizedMessage ?: "Network error connecting to $endpoint"
-                _userMessage.tryEmit("Error: $errMsg")
             }
         }
     }
@@ -383,7 +456,12 @@ class AyneViewModel(
                     response.amharic.ifBlank { response.english }
                 }
 
-                val guidanceMsg = response.cameraGuidance
+                val guidanceMsg = when {
+                    !response.cameraGuidance.isNullOrBlank() -> response.cameraGuidance
+                    response.isBlurry == true -> "ምስሉ ደብዛዛ ነው፤ እባክዎ ካሜራውን ሳያንቀሳቅሱ ያቆዩት"
+                    response.isLegible == false -> "ጽሑፉ በግልጽ አይታይም፤ እባክዎ ካሜራውን ወደ ጽሑፉ ያቅርቡ"
+                    else -> null
+                }
                 if (!guidanceMsg.isNullOrBlank()) {
                     _userMessage.tryEmit(guidanceMsg)
                 }
@@ -461,6 +539,11 @@ class MainActivity : ComponentActivity() {
     private var onVolumeCaptureTriggered: (() -> Unit)? = null
     private var onVolumeFollowUpTriggered: (() -> Unit)? = null
 
+    private var volumeUpPressTime = 0L
+    private var volumeDownPressTime = 0L
+    private var isVolumeUpLongPress = false
+    private var isVolumeDownLongPress = false
+
     fun registerVolumeHandlers(onCapture: () -> Unit, onFollowUp: () -> Unit) {
         onVolumeCaptureTriggered = onCapture
         onVolumeFollowUpTriggered = onFollowUp
@@ -480,19 +563,69 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-        return when (keyCode) {
+        when (keyCode) {
             KeyEvent.KEYCODE_VOLUME_UP -> {
-                onVolumeCaptureTriggered?.invoke()
-                    ?: viewModel.onAction(this, AyneAction.VolumeCaptureTriggered)
-                true
+                if (event != null) {
+                    if (event.repeatCount > 0) {
+                        isVolumeUpLongPress = true
+                        return super.onKeyDown(keyCode, event)
+                    }
+                    volumeUpPressTime = System.currentTimeMillis()
+                    isVolumeUpLongPress = false
+                    event.startTracking()
+                    return true
+                }
             }
             KeyEvent.KEYCODE_VOLUME_DOWN -> {
-                onVolumeFollowUpTriggered?.invoke()
-                    ?: viewModel.onAction(this, AyneAction.VolumeFollowUpTriggered)
-                true
+                if (event != null) {
+                    if (event.repeatCount > 0) {
+                        isVolumeDownLongPress = true
+                        return super.onKeyDown(keyCode, event)
+                    }
+                    volumeDownPressTime = System.currentTimeMillis()
+                    isVolumeDownLongPress = false
+                    event.startTracking()
+                    return true
+                }
             }
-            else -> super.onKeyDown(keyCode, event)
         }
+        return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onKeyLongPress(keyCode: Int, event: KeyEvent?): Boolean {
+        when (keyCode) {
+            KeyEvent.KEYCODE_VOLUME_UP -> {
+                isVolumeUpLongPress = true
+                return super.onKeyLongPress(keyCode, event)
+            }
+            KeyEvent.KEYCODE_VOLUME_DOWN -> {
+                isVolumeDownLongPress = true
+                return super.onKeyLongPress(keyCode, event)
+            }
+        }
+        return super.onKeyLongPress(keyCode, event)
+    }
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
+        when (keyCode) {
+            KeyEvent.KEYCODE_VOLUME_UP -> {
+                if (!isVolumeUpLongPress && (System.currentTimeMillis() - volumeUpPressTime < 600)) {
+                    onVolumeCaptureTriggered?.invoke()
+                        ?: viewModel.onAction(this, AyneAction.VolumeCaptureTriggered)
+                    return true
+                }
+                return super.onKeyUp(keyCode, event)
+            }
+            KeyEvent.KEYCODE_VOLUME_DOWN -> {
+                if (!isVolumeDownLongPress && (System.currentTimeMillis() - volumeDownPressTime < 600)) {
+                    onVolumeFollowUpTriggered?.invoke()
+                        ?: viewModel.onAction(this, AyneAction.VolumeFollowUpTriggered)
+                    return true
+                }
+                return super.onKeyUp(keyCode, event)
+            }
+        }
+        return super.onKeyUp(keyCode, event)
     }
 }
 
@@ -608,6 +741,8 @@ fun AyneAppScreen(
     }
 
     fun triggerDescribeSurroundings() {
+        viewModel.bargeIn()
+        viewModel.playTapEarcon()
         requireCameraPermission {
             coroutineScope.launch {
                 val frame = CameraCaptureHelper.captureFrame(context, imageCapture)
@@ -617,6 +752,8 @@ fun AyneAppScreen(
     }
 
     fun triggerReadText() {
+        viewModel.bargeIn()
+        viewModel.playTapEarcon()
         requireCameraPermission {
             coroutineScope.launch {
                 val frame = CameraCaptureHelper.captureFrame(context, imageCapture)
@@ -628,7 +765,11 @@ fun AyneAppScreen(
     LaunchedEffect(onRegisterVolumeHandlers) {
         onRegisterVolumeHandlers?.invoke(
             { triggerDescribeSurroundings() },
-            { requireMicPermission { viewModel.onAction(context, AyneAction.AskQuestion) } }
+            {
+                viewModel.bargeIn()
+                viewModel.playTapEarcon()
+                requireMicPermission { viewModel.onAction(context, AyneAction.AskQuestion) }
+            }
         )
     }
 
@@ -670,6 +811,8 @@ fun AyneAppScreen(
             onDescribeClick = { triggerDescribeSurroundings() },
             onReadTextClick = { triggerReadText() },
             onAskQuestionClick = {
+                viewModel.bargeIn()
+                viewModel.playTapEarcon()
                 requireMicPermission {
                     viewModel.onAction(context, AyneAction.AskQuestion)
                 }

@@ -122,3 +122,17 @@ data class ReadTextResponse(
         }
     }
 }
+
+/**
+ * SSE Real-time Streaming Events
+ */
+data class StreamVisionEvent(
+    val amharic: String,
+    val english: String,
+    val visionLatencyMs: Long?
+)
+
+data class StreamAudioChunkEvent(
+    val chunkBase64: String,
+    val format: String = "mp3"
+)
