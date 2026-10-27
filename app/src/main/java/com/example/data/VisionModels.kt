@@ -67,7 +67,7 @@ data class VisionDescribeResponse(
             val rawAmharic = root.optString("amharic", "")
             val cleanAmharic = rawAmharic.cleanLabelPrefix()
             val cleanSpeech = root.optString("cleanSpeech").takeIf { it.isNotEmpty() }?.cleanLabelPrefix()
-            val sessionId = root.optString("sessionId").takeIf { it.isNotBlank() && it != "null" }
+            val sessionId = root.optString("sessionId").ifEmpty { root.optString("chatId") }.takeIf { it.isNotBlank() && it != "null" }
 
             return VisionDescribeResponse(
                 success = root.optBoolean("success", true),

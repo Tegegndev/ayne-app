@@ -40,15 +40,18 @@ class VisionApiService(
         try {
             val jsonPayload = JSONObject().apply {
                 if (!sessionId.isNullOrBlank() && imageBase64.isNullOrBlank()) {
-                    // Turn 2+: Zero-Upload follow-up! Send ONLY sessionId
+                    // Turn 2+: Zero-Upload follow-up! Send ONLY sessionId / chatId
                     put("sessionId", sessionId)
+                    put("chatId", sessionId)
                 } else if (!imageBase64.isNullOrBlank()) {
                     put("imageBase64", imageBase64)
                     if (!sessionId.isNullOrBlank()) {
                         put("sessionId", sessionId)
+                        put("chatId", sessionId)
                     }
                 } else if (!sessionId.isNullOrBlank()) {
                     put("sessionId", sessionId)
+                    put("chatId", sessionId)
                 }
 
                 if (!audioBase64.isNullOrBlank()) {
@@ -136,15 +139,18 @@ class VisionApiService(
 
             val jsonPayload = JSONObject().apply {
                 if (!sessionId.isNullOrBlank() && imageBase64.isNullOrBlank()) {
-                    // Turn 2+: Zero-Upload follow-up! Send ONLY sessionId
+                    // Turn 2+: Zero-Upload follow-up! Send ONLY sessionId / chatId
                     put("sessionId", sessionId)
+                    put("chatId", sessionId)
                 } else if (!imageBase64.isNullOrBlank()) {
                     put("imageBase64", imageBase64)
                     if (!sessionId.isNullOrBlank()) {
                         put("sessionId", sessionId)
+                        put("chatId", sessionId)
                     }
                 } else if (!sessionId.isNullOrBlank()) {
                     put("sessionId", sessionId)
+                    put("chatId", sessionId)
                 }
 
                 if (!audioBase64.isNullOrBlank()) {

@@ -148,9 +148,10 @@ class MirkuzVisionRepository(
         stopCurrentSpeech()
 
         val json = JSONObject().apply {
-            // If we have an active session and no new image was captured, send ONLY sessionId!
+            // If we have an active session and no new image was captured, send ONLY sessionId / chatId!
             if (activeSessionId != null && newImageBase64 == null) {
                 put("sessionId", activeSessionId)
+                put("chatId", activeSessionId)
             } else if (newImageBase64 != null) {
                 put("imageBase64", newImageBase64)
             }
@@ -174,9 +175,10 @@ class MirkuzVisionRepository(
                 try {
                     val resObj = JSONObject(bodyStr)
                     if (resObj.optBoolean("success", true)) {
-                        // Cache sessionId for subsequent follow-up turns
-                        resObj.optString("sessionId").takeIf { it.isNotBlank() && it != "null" }?.let {
-                            activeSessionId = it
+                        // Cache sessionId / chatId for subsequent follow-up turns
+                        val sid = resObj.optString("sessionId").ifEmpty { resObj.optString("chatId") }.takeIf { it.isNotBlank() && it != "null" }
+                        if (sid != null) {
+                            activeSessionId = sid
                         }
 
                         val amharicText = resObj.optString("amharic").cleanLabelPrefix()

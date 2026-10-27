@@ -101,9 +101,10 @@ class VisualSessionManager(
         }
 
         val payload = JSONObject().apply {
-            // Zero-Upload: If sessionId is cached, send ONLY sessionId! 0 image bytes!
+            // Zero-Upload: If sessionId is cached, send ONLY sessionId / chatId! 0 image bytes!
             if (currentSessionId != null) {
                 put("sessionId", currentSessionId)
+                put("chatId", currentSessionId)
             } else {
                 put("imageBase64", image)
                 val historyArray = JSONArray().apply {
@@ -143,8 +144,8 @@ class VisualSessionManager(
 
                 try {
                     val json = JSONObject(body)
-                    // Cache sessionId for subsequent zero-upload follow-up turns
-                    val sid = json.optString("sessionId").takeIf { it.isNotBlank() && it != "null" }
+                    // Cache sessionId / chatId for subsequent zero-upload follow-up turns
+                    val sid = json.optString("sessionId").ifEmpty { json.optString("chatId") }.takeIf { it.isNotBlank() && it != "null" }
                     if (sid != null) {
                         activeSessionId = sid
                     }
