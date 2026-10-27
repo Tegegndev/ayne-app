@@ -22,6 +22,14 @@
     
     <string name="snackbar_coming_soon">በቅርቡ ይጀምራል — ገና አልተገናኘም</string>
     <string name="snackbar_no_answer">እስካሁን ምንም ምላሽ የለም</string>
+    <string name="camera_permission_granted">የካሜራ ፈቃድ ተሰጥቷል። ለመቃኘት ዝግጁ ነው።</string>
+    <string name="camera_permission_denied">ዙሪያውን ለማስረዳትና ጽሑፍ ለማንበብ የካሜራ ፈቃድ ያስፈልጋል። እባክዎን ፈቃድ ይስጡ።</string>
+    <string name="mic_permission_granted">የማይክሮፎን ፈቃድ ተሰጥቷል። ለመስማት ዝግጁ ነው።</string>
+    <string name="mic_permission_denied">በድምፅ ጥያቄ ለመጠየቅ የማይክሮፎን ፈቃድ ያስፈልጋል። እባክዎን ፈቃድ ይስጡ።</string>
+    
+    <string name="permission_dialog_title">ፈቃድ ያስፈልጋል</string>
+    <string name="permission_dialog_open_settings">ማስተካከያ ክፈት</string>
+    <string name="permission_dialog_dismiss">ዝጋ</string>
     
     <string name="language_amharic">አማርኛ</string>
     <string name="language_oromo">Afaan Oromoo</string>

@@ -25,6 +25,14 @@
     <!-- Feedback Messages -->
     <string name="snackbar_coming_soon">Coming soon — backend not connected</string>
     <string name="snackbar_no_answer">No answer yet</string>
+    <string name="camera_permission_granted">Camera permission granted. Ready to scan.</string>
+    <string name="camera_permission_denied">Camera permission is required to describe surroundings and read text. Please grant camera access.</string>
+    <string name="mic_permission_granted">Microphone permission granted. Ready to listen.</string>
+    <string name="mic_permission_denied">Microphone permission is required to ask questions by voice. Please grant microphone access.</string>
+    
+    <string name="permission_dialog_title">Permission Required</string>
+    <string name="permission_dialog_open_settings">Open Settings</string>
+    <string name="permission_dialog_dismiss">Dismiss</string>
     
     <!-- Languages -->
     <string name="language_amharic">አማርኛ</string>

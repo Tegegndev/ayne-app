@@ -1,10 +1,18 @@
 package com.example
 
+import android.Manifest
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -34,10 +42,13 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.NetworkCell
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material3.AlertDialog
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
@@ -49,12 +60,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -63,12 +77,11 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import com.example.ui.theme.AyneOnYellow
 import com.example.ui.theme.AynePureBlack
 import com.example.ui.theme.AynePureWhite
@@ -81,7 +94,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
 
 // ==========================================
 // Domain & State Models
@@ -117,16 +129,20 @@ class AyneViewModel : ViewModel() {
     private val _userMessage = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val userMessage: SharedFlow<String> = _userMessage.asSharedFlow()
 
+    fun showMessage(msg: String) {
+        _userMessage.tryEmit(msg)
+    }
+
     fun onAction(action: AyneAction) {
         when (action) {
             is AyneAction.DescribeSurroundings -> {
-                _userMessage.tryEmit("Coming soon — backend not connected")
+                _userMessage.tryEmit("Camera active: Capturing surroundings... (Coming soon — backend not connected)")
             }
             is AyneAction.ReadText -> {
-                _userMessage.tryEmit("Coming soon — backend not connected")
+                _userMessage.tryEmit("Camera active: Scanning text... (Coming soon — backend not connected)")
             }
             is AyneAction.AskQuestion -> {
-                _userMessage.tryEmit("Coming soon — backend not connected")
+                _userMessage.tryEmit("Microphone active: Listening for voice input... (Coming soon — backend not connected)")
             }
             is AyneAction.RepeatLastAnswer -> {
                 val answer = _uiState.value.lastAnswer
@@ -141,10 +157,10 @@ class AyneViewModel : ViewModel() {
                 _userMessage.tryEmit("Language: ${action.language.displayName}")
             }
             is AyneAction.VolumeCapture -> {
-                _userMessage.tryEmit("Volume ▲ Capture: Coming soon — backend not connected")
+                _userMessage.tryEmit("Volume ▲ Capture: Ready to scan (Coming soon — backend not connected)")
             }
             is AyneAction.VolumeFollowUp -> {
-                _userMessage.tryEmit("Volume ▼ Follow-up: Coming soon — backend not connected")
+                _userMessage.tryEmit("Volume ▼ Follow-up: Ready to listen (Coming soon — backend not connected)")
             }
         }
     }
@@ -157,13 +173,23 @@ class AyneViewModel : ViewModel() {
 class MainActivity : ComponentActivity() {
     private val viewModel: AyneViewModel by viewModels()
 
+    // Key event triggers for volume shortcuts
+    private var onVolumeCaptureTriggered: (() -> Unit)? = null
+    private var onVolumeFollowUpTriggered: (() -> Unit)? = null
+
+    fun registerVolumeHandlers(onCapture: () -> Unit, onFollowUp: () -> Unit) {
+        onVolumeCaptureTriggered = onCapture
+        onVolumeFollowUpTriggered = onFollowUp
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
             AyneTheme {
                 AyneAppScreen(
-                    viewModel = viewModel
+                    viewModel = viewModel,
+                    onRegisterVolumeHandlers = ::registerVolumeHandlers
                 )
             }
         }
@@ -172,11 +198,11 @@ class MainActivity : ComponentActivity() {
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         return when (keyCode) {
             KeyEvent.KEYCODE_VOLUME_UP -> {
-                viewModel.onAction(AyneAction.VolumeCapture)
+                onVolumeCaptureTriggered?.invoke() ?: viewModel.onAction(AyneAction.VolumeCapture)
                 true
             }
             KeyEvent.KEYCODE_VOLUME_DOWN -> {
-                viewModel.onAction(AyneAction.VolumeFollowUp)
+                onVolumeFollowUpTriggered?.invoke() ?: viewModel.onAction(AyneAction.VolumeFollowUp)
                 true
             }
             else -> super.onKeyDown(keyCode, event)
@@ -185,16 +211,94 @@ class MainActivity : ComponentActivity() {
 }
 
 // ==========================================
-// Screen Composables
+// Screen Composables with Runtime Permissions
 // ==========================================
 
 @Composable
 fun AyneAppScreen(
     viewModel: AyneViewModel,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onRegisterVolumeHandlers: (((() -> Unit), (() -> Unit)) -> Unit)? = null
 ) {
+    val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
     val uiState by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+
+    // Rationale dialog state
+    var pendingPermissionDialog by remember { mutableStateOf<String?>(null) }
+    var pendingPermissionMessage by remember { mutableStateOf("") }
+
+    // Camera permission launcher
+    var onCameraGrantedAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            viewModel.showMessage(context.getString(R.string.camera_permission_granted))
+            onCameraGrantedAction?.invoke()
+        } else {
+            pendingPermissionDialog = Manifest.permission.CAMERA
+            pendingPermissionMessage = context.getString(R.string.camera_permission_denied)
+            viewModel.showMessage(context.getString(R.string.camera_permission_denied))
+        }
+        onCameraGrantedAction = null
+    }
+
+    // Audio/Mic permission launcher
+    var onMicGrantedAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val micPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            viewModel.showMessage(context.getString(R.string.mic_permission_granted))
+            onMicGrantedAction?.invoke()
+        } else {
+            pendingPermissionDialog = Manifest.permission.RECORD_AUDIO
+            pendingPermissionMessage = context.getString(R.string.mic_permission_denied)
+            viewModel.showMessage(context.getString(R.string.mic_permission_denied))
+        }
+        onMicGrantedAction = null
+    }
+
+    // Helper functions to verify permission before triggering actions
+    fun requireCameraPermission(onGranted: () -> Unit) {
+        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        val hasPermission = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.CAMERA
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (hasPermission) {
+            onGranted()
+        } else {
+            onCameraGrantedAction = onGranted
+            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
+    fun requireMicPermission(onGranted: () -> Unit) {
+        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        val hasPermission = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (hasPermission) {
+            onGranted()
+        } else {
+            onMicGrantedAction = onGranted
+            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
+    // Register volume key shortcuts with runtime permission gating
+    LaunchedEffect(onRegisterVolumeHandlers) {
+        onRegisterVolumeHandlers?.invoke(
+            { requireCameraPermission { viewModel.onAction(AyneAction.VolumeCapture) } },
+            { requireMicPermission { viewModel.onAction(AyneAction.VolumeFollowUp) } }
+        )
+    }
 
     LaunchedEffect(viewModel) {
         viewModel.userMessage.collect { message ->
@@ -231,8 +335,81 @@ fun AyneAppScreen(
         AyneScreenContent(
             uiState = uiState,
             onAction = viewModel::onAction,
+            onRequestCameraAction = { onGranted -> requireCameraPermission(onGranted) },
+            onRequestMicAction = { onGranted -> requireMicPermission(onGranted) },
             modifier = Modifier.padding(innerPadding)
         )
+
+        // Accessible High-Contrast Permission Rationale Dialog
+        if (pendingPermissionDialog != null) {
+            AlertDialog(
+                onDismissRequest = { pendingPermissionDialog = null },
+                shape = RoundedCornerShape(16.dp),
+                containerColor = AynePureBlack,
+                titleContentColor = AyneVibrantYellow,
+                textContentColor = AynePureWhite,
+                modifier = Modifier
+                    .border(2.dp, AyneVibrantYellow, RoundedCornerShape(16.dp))
+                    .testTag("permission_rationale_dialog"),
+                title = {
+                    Text(
+                        text = stringResource(R.string.permission_dialog_title),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = AyneVibrantYellow
+                    )
+                },
+                text = {
+                    Text(
+                        text = pendingPermissionMessage,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = AynePureWhite,
+                        lineHeight = 24.sp
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            pendingPermissionDialog = null
+                            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                data = Uri.fromParts("package", context.packageName, null)
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            }
+                            context.startActivity(intent)
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AyneVibrantYellow,
+                            contentColor = AyneOnYellow
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .testTag("open_settings_button")
+                    ) {
+                        Text(
+                            text = stringResource(R.string.permission_dialog_open_settings),
+                            fontWeight = FontWeight.Bold,
+                            color = AyneOnYellow
+                        )
+                    }
+                },
+                dismissButton = {
+                    OutlinedButton(
+                        onClick = { pendingPermissionDialog = null },
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .testTag("dismiss_permission_dialog_button")
+                    ) {
+                        Text(
+                            text = stringResource(R.string.permission_dialog_dismiss),
+                            color = AynePureWhite,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            )
+        }
     }
 }
 
@@ -240,9 +417,12 @@ fun AyneAppScreen(
 fun AyneScreenContent(
     uiState: AyneUiState,
     onAction: (AyneAction) -> Unit,
+    onRequestCameraAction: (() -> Unit) -> Unit,
+    onRequestMicAction: (() -> Unit) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val scrollState = rememberScrollState()
+    val haptic = LocalHapticFeedback.current
 
     Column(
         modifier = modifier
@@ -256,7 +436,10 @@ fun AyneScreenContent(
         AyneTopBar(
             selectedLanguage = uiState.selectedLanguage,
             batteryPercentage = uiState.batteryPercentage,
-            onLanguageSelected = { onAction(AyneAction.SelectLanguage(it)) }
+            onLanguageSelected = {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onAction(AyneAction.SelectLanguage(it))
+            }
         )
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -268,34 +451,46 @@ fun AyneScreenContent(
                 .weight(1f, fill = false),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Card 1: Describe Surroundings
+            // Card 1: Describe Surroundings (requires CAMERA)
             AyneActionCard(
                 icon = Icons.Filled.PhotoCamera,
                 title = stringResource(R.string.describe_surroundings_title),
                 subtitle = stringResource(R.string.describe_surroundings_amharic),
                 contentDescription = stringResource(R.string.describe_surroundings_desc),
                 testTag = "card_describe_surroundings",
-                onClick = { onAction(AyneAction.DescribeSurroundings) }
+                onClick = {
+                    onRequestCameraAction {
+                        onAction(AyneAction.DescribeSurroundings)
+                    }
+                }
             )
 
-            // Card 2: Read Text
+            // Card 2: Read Text (requires CAMERA)
             AyneActionCard(
                 icon = Icons.Filled.Description,
                 title = stringResource(R.string.read_text_title),
                 subtitle = stringResource(R.string.read_text_amharic),
                 contentDescription = stringResource(R.string.read_text_desc),
                 testTag = "card_read_text",
-                onClick = { onAction(AyneAction.ReadText) }
+                onClick = {
+                    onRequestCameraAction {
+                        onAction(AyneAction.ReadText)
+                    }
+                }
             )
 
-            // Card 3: Ask Question
+            // Card 3: Ask Question (requires RECORD_AUDIO)
             AyneActionCard(
                 icon = Icons.Filled.Mic,
                 title = stringResource(R.string.ask_question_title),
                 subtitle = stringResource(R.string.ask_question_amharic),
                 contentDescription = stringResource(R.string.ask_question_desc),
                 testTag = "card_ask_question",
-                onClick = { onAction(AyneAction.AskQuestion) }
+                onClick = {
+                    onRequestMicAction {
+                        onAction(AyneAction.AskQuestion)
+                    }
+                }
             )
         }
 
@@ -303,7 +498,10 @@ fun AyneScreenContent(
 
         // 3. Bottom Controls: Repeat Button & Volume Hint
         AyneBottomControls(
-            onRepeatClick = { onAction(AyneAction.RepeatLastAnswer) }
+            onRepeatClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                onAction(AyneAction.RepeatLastAnswer)
+            }
         )
     }
 }
@@ -644,7 +842,9 @@ fun AyneAppScreenPreview() {
     AyneTheme {
         AyneScreenContent(
             uiState = AyneUiState(),
-            onAction = {}
+            onAction = {},
+            onRequestCameraAction = {},
+            onRequestMicAction = {}
         )
     }
 }
