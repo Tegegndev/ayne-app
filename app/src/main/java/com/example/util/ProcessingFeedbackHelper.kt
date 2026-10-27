@@ -5,7 +5,6 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
-import android.media.MediaActionSound
 import android.media.ToneGenerator
 import android.os.Build
 import android.os.VibrationEffect
@@ -21,26 +20,28 @@ import kotlin.math.PI
 import kotlin.math.exp
 import kotlin.math.sin
 
+/**
+ * Audio and Haptic feedback helper for blind and visually impaired users.
+ * Uses pleasant, gentle assistant chimes instead of awkward or jarring camera shutter sounds.
+ */
 class ProcessingFeedbackHelper(private val context: Context) {
     private var toneGenerator: ToneGenerator? = null
-    private var audioTrack: AudioTrack? = null
+    private var workingPulseTrack: AudioTrack? = null
+    private var tapChimeTrack: AudioTrack? = null
     private var loopJob: Job? = null
 
-    private val mediaActionSound: MediaActionSound? by lazy {
-        try {
-            MediaActionSound().apply {
-                load(MediaActionSound.SHUTTER_CLICK)
-            }
-        } catch (e: Exception) {
-            null
-        }
-    }
-
-    // Precomputed high-volume, resonant acoustic sonar pulse
     private val sampleRate = 44100
+
+    // 1. Pleasant, gentle dual-tone assistant tap chime (~120ms)
+    // Plays a soft, warm ascending harmonic chime (E5 -> B5)
+    private val tapDurationMs = 120
+    private val tapNumSamples = (sampleRate * tapDurationMs) / 1000
+    private val pcmTapBuffer = ShortArray(tapNumSamples)
+
+    // 2. High-volume, resonant acoustic sonar pulse for working/analyzing state (~200ms)
     private val pulseDurationMs = 200
-    private val numSamples = (sampleRate * pulseDurationMs) / 1000
-    private val pcmPulseBuffer = ShortArray(numSamples)
+    private val pulseNumSamples = (sampleRate * pulseDurationMs) / 1000
+    private val pcmPulseBuffer = ShortArray(pulseNumSamples)
 
     private val vibrator: Vibrator? by lazy {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -53,8 +54,53 @@ class ProcessingFeedbackHelper(private val context: Context) {
     }
 
     init {
-        // Build rich, loud acoustic pulse: 620Hz fundamental + 1240Hz warm harmonic with full dynamic range
-        for (i in 0 until numSamples) {
+        // --- Synthesize Pleasant Tap Chime ---
+        // Warm, friendly two-tone assistant earcon (659Hz E5 blending into 988Hz B5)
+        for (i in 0 until tapNumSamples) {
+            val t = i.toDouble() / sampleRate
+            val sample = if (t < 0.045) {
+                // First soft bell note (659Hz) with smooth fade-in
+                val attack = (t / 0.008).coerceAtMost(1.0)
+                val decay = exp(-t * 22.0)
+                val wave = sin(2.0 * PI * 659.25 * t) + 0.3 * sin(2.0 * PI * 1318.5 * t)
+                (wave * attack * decay * Short.MAX_VALUE * 0.75).toInt()
+            } else {
+                // Second bright, cheerful bell note (987.7Hz)
+                val t2 = t - 0.045
+                val attack = (t2 / 0.006).coerceAtMost(1.0)
+                val decay = exp(-t2 * 25.0)
+                val wave = sin(2.0 * PI * 987.77 * t2) + 0.25 * sin(2.0 * PI * 1975.5 * t2)
+                (wave * attack * decay * Short.MAX_VALUE * 0.75).toInt()
+            }
+            pcmTapBuffer[i] = sample.coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
+        }
+
+        try {
+            tapChimeTrack = AudioTrack.Builder()
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(sampleRate)
+                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                        .build()
+                )
+                .setBufferSizeInBytes(pcmTapBuffer.size * 2)
+                .setTransferMode(AudioTrack.MODE_STATIC)
+                .build().apply {
+                    write(pcmTapBuffer, 0, pcmTapBuffer.size)
+                }
+        } catch (e: Exception) {
+            tapChimeTrack = null
+        }
+
+        // --- Synthesize Working Sonar Pulse ---
+        for (i in 0 until pulseNumSamples) {
             val t = i.toDouble() / sampleRate
             val envelope = exp(-t * 9.0) // Smooth decay envelope for clear resonance
             val fundamental = sin(2.0 * PI * 620.0 * t)
@@ -65,7 +111,7 @@ class ProcessingFeedbackHelper(private val context: Context) {
         }
 
         try {
-            audioTrack = AudioTrack.Builder()
+            workingPulseTrack = AudioTrack.Builder()
                 .setAudioAttributes(
                     AudioAttributes.Builder()
                         .setUsage(AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)
@@ -85,30 +131,39 @@ class ProcessingFeedbackHelper(private val context: Context) {
                     write(pcmPulseBuffer, 0, pcmPulseBuffer.size)
                 }
         } catch (e: Exception) {
-            audioTrack = null
+            workingPulseTrack = null
         }
 
         try {
-            // ToneGenerator at 100% maximum volume for fallback
-            toneGenerator = ToneGenerator(AudioManager.STREAM_MUSIC, 100)
+            toneGenerator = ToneGenerator(AudioManager.STREAM_MUSIC, 85)
         } catch (e: Exception) {
             toneGenerator = null
         }
     }
 
     /**
-     * Instant shutter / click earcon and haptic feedback triggered immediately on button tap (0ms)
-     * so blind users have zero-latency sensory feedback before network operations commence.
+     * Pleasant, gentle tap earcon and haptic feedback triggered immediately on button tap (0ms)
+     * so blind users have zero-latency sensory feedback without any jarring or creepy shutter sounds.
      */
     fun playInstantTapEarcon() {
+        var played = false
         try {
-            mediaActionSound?.play(MediaActionSound.SHUTTER_CLICK) ?: run {
-                toneGenerator?.startTone(ToneGenerator.TONE_PROP_BEEP2, 70)
+            tapChimeTrack?.let { track ->
+                track.stop()
+                track.reloadStaticData()
+                track.play()
+                played = true
             }
         } catch (e: Exception) {
+            played = false
+        }
+
+        if (!played) {
             try {
-                toneGenerator?.startTone(ToneGenerator.TONE_PROP_BEEP2, 70)
-            } catch (ignored: Exception) {}
+                toneGenerator?.startTone(ToneGenerator.TONE_PROP_BEEP, 50)
+            } catch (e: Exception) {
+                // Ignore tone failure
+            }
         }
 
         try {
@@ -117,10 +172,10 @@ class ProcessingFeedbackHelper(private val context: Context) {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                         v.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_CLICK))
                     } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        v.vibrate(VibrationEffect.createOneShot(45, VibrationEffect.DEFAULT_AMPLITUDE))
+                        v.vibrate(VibrationEffect.createOneShot(40, VibrationEffect.DEFAULT_AMPLITUDE))
                     } else {
                         @Suppress("DEPRECATION")
-                        v.vibrate(45)
+                        v.vibrate(40)
                     }
                 }
             }
@@ -149,7 +204,7 @@ class ProcessingFeedbackHelper(private val context: Context) {
                 }
             } finally {
                 try {
-                    audioTrack?.stop()
+                    workingPulseTrack?.stop()
                     toneGenerator?.stopTone()
                 } catch (e: Exception) {
                     // Ignore
@@ -163,7 +218,7 @@ class ProcessingFeedbackHelper(private val context: Context) {
 
         // 1. Play high-volume acoustic sonar pulse via AudioTrack
         try {
-            audioTrack?.let { track ->
+            workingPulseTrack?.let { track ->
                 track.stop()
                 track.reloadStaticData()
                 track.play()
@@ -173,10 +228,10 @@ class ProcessingFeedbackHelper(private val context: Context) {
             played = false
         }
 
-        // 2. Fallback to full volume ToneGenerator if AudioTrack is unavailable
+        // 2. Fallback to tone generator if AudioTrack is unavailable
         if (!played) {
             try {
-                toneGenerator?.startTone(ToneGenerator.TONE_PROP_PROMPT, 180)
+                toneGenerator?.startTone(ToneGenerator.TONE_PROP_PROMPT, 150)
             } catch (e: Exception) {
                 // Ignore tone failure
             }
@@ -203,7 +258,7 @@ class ProcessingFeedbackHelper(private val context: Context) {
         loopJob?.cancel()
         loopJob = null
         try {
-            audioTrack?.stop()
+            workingPulseTrack?.stop()
             toneGenerator?.stopTone()
         } catch (e: Exception) {
             // Ignore
@@ -213,8 +268,8 @@ class ProcessingFeedbackHelper(private val context: Context) {
     fun playSuccessTone() {
         stopWorkingFeedback()
         try {
-            // Loud high-frequency acknowledgment chime (volume 100)
-            toneGenerator?.startTone(ToneGenerator.TONE_PROP_ACK, 220)
+            // Pleasant high-frequency acknowledgment chime
+            toneGenerator?.startTone(ToneGenerator.TONE_PROP_ACK, 200)
         } catch (e: Exception) {
             // Ignore
         }
@@ -223,11 +278,18 @@ class ProcessingFeedbackHelper(private val context: Context) {
     fun release() {
         stopWorkingFeedback()
         try {
-            audioTrack?.release()
+            workingPulseTrack?.release()
         } catch (e: Exception) {
             // Ignore
         }
-        audioTrack = null
+        workingPulseTrack = null
+
+        try {
+            tapChimeTrack?.release()
+        } catch (e: Exception) {
+            // Ignore
+        }
+        tapChimeTrack = null
 
         try {
             toneGenerator?.release()
@@ -235,11 +297,5 @@ class ProcessingFeedbackHelper(private val context: Context) {
             // Ignore
         }
         toneGenerator = null
-
-        try {
-            mediaActionSound?.release()
-        } catch (e: Exception) {
-            // Ignore
-        }
     }
 }
