@@ -86,4 +86,7 @@
     <string name="debug_preview_tap_to_enlarge">Tap to inspect</string>
     <string name="debug_dialog_title">Captured Frame Preview</string>
     <string name="debug_dialog_close">Close</string>
+    <string name="dismiss_result_desc">Dismiss result</string>
+    <string name="view_verbatim_text">View Verbatim OCR Text · ሙሉ ጽሑፉን አሳይ</string>
+    <string name="hide_verbatim_text">Hide Verbatim Text · ዝርዝር ጽሑፉን ደብቅ</string>
 </resources>

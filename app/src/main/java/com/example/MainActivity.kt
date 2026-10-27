@@ -196,6 +196,7 @@ sealed interface AyneAction {
     data object CancelVoiceRecording : AyneAction
     data class AskFollowUp(val voiceBase64: String? = null, val textQuery: String? = null) : AyneAction
     data object ClearSession : AyneAction
+    data object DismissResult : AyneAction
     data object AskQuestion : AyneAction
     data object RepeatLastAnswer : AyneAction
     data class SelectLanguage(val language: SupportedLanguage) : AyneAction
@@ -334,11 +335,25 @@ class AyneViewModel(
             is AyneAction.AskFollowUp -> {
                 executeFollowUpRequest(context, action.voiceBase64, action.textQuery)
             }
+            is AyneAction.DismissResult -> {
+                _uiState.update {
+                    it.copy(
+                        lastReadResponse = null,
+                        lastResponse = null,
+                        lastAnswer = null,
+                        lastEnglishAnswer = null
+                    )
+                }
+            }
             is AyneAction.ClearSession -> {
                 _uiState.update {
                     it.copy(
                         lockedImageBase64 = null,
                         lastCapturedBase64 = null,
+                        lastReadResponse = null,
+                        lastResponse = null,
+                        lastAnswer = null,
+                        lastEnglishAnswer = null,
                         conversationHistory = emptyList(),
                         isRecordingVoice = false
                     )
@@ -417,18 +432,19 @@ class AyneViewModel(
         val state = _uiState.value
         val progressMsg = context.getString(R.string.analyzing_surroundings)
 
-        // Reset history and lock image
+        // Reset history, lock image, and clear previous optical readings
         _uiState.update {
             it.copy(
                 isBusy = true,
                 busyMessage = progressMsg,
                 lockedImageBase64 = frameBase64,
                 lastCapturedBase64 = frameBase64,
+                lastReadResponse = null,
+                lastResponse = null,
                 conversationHistory = emptyList(),
                 isRecordingVoice = false
             )
         }
-        _userMessage.tryEmit(progressMsg)
         processingFeedbackHelper?.startWorkingFeedback(viewModelScope)
 
         viewModelScope.launch {
@@ -464,12 +480,12 @@ class AyneViewModel(
                         it.copy(
                             lastAnswer = chosenAnswer,
                             lastEnglishAnswer = visionEvent.english,
+                            lastReadResponse = null,
                             conversationHistory = initialHistory,
                             lockedImageBase64 = frameBase64,
                             busyMessage = null
                         )
                     }
-                    _userMessage.tryEmit(chosenAnswer)
                 },
                 onAudioChunk = { chunkEvent ->
                     audioChunks.append(chunkEvent.chunkBase64)
@@ -544,8 +560,6 @@ class AyneViewModel(
                                 _userMessage.tryEmit("Audio error: $err")
                             }
                         )
-                    } else {
-                        _userMessage.tryEmit(chosenAnswer)
                     }
                 }.onFailure { error ->
                     processingFeedbackHelper?.stopWorkingFeedback()
@@ -594,10 +608,10 @@ class AyneViewModel(
         _uiState.update {
             it.copy(
                 isBusy = true,
-                busyMessage = progressMsg
+                busyMessage = progressMsg,
+                lastReadResponse = null
             )
         }
-        _userMessage.tryEmit(progressMsg)
         processingFeedbackHelper?.startWorkingFeedback(viewModelScope)
 
         viewModelScope.launch {
@@ -634,11 +648,11 @@ class AyneViewModel(
                         it.copy(
                             lastAnswer = chosenAnswer,
                             lastEnglishAnswer = visionEvent.english,
+                            lastReadResponse = null,
                             conversationHistory = updatedHistory,
                             busyMessage = null
                         )
                     }
-                    _userMessage.tryEmit(chosenAnswer)
                 },
                 onAudioChunk = { chunkEvent ->
                     audioChunks.append(chunkEvent.chunkBase64)
@@ -713,8 +727,6 @@ class AyneViewModel(
                                 _userMessage.tryEmit("Audio error: $err")
                             }
                         )
-                    } else {
-                        _userMessage.tryEmit(chosenAnswer)
                     }
                 }.onFailure { error ->
                     processingFeedbackHelper?.stopWorkingFeedback()
@@ -751,10 +763,10 @@ class AyneViewModel(
             it.copy(
                 isBusy = true,
                 busyMessage = progressMsg,
-                lastCapturedBase64 = frameBase64
+                lastCapturedBase64 = frameBase64,
+                lastReadResponse = null
             )
         }
-        _userMessage.tryEmit(progressMsg)
         processingFeedbackHelper?.startWorkingFeedback(viewModelScope)
 
         viewModelScope.launch {
@@ -812,8 +824,6 @@ class AyneViewModel(
                             _userMessage.tryEmit("Audio error: $err")
                         }
                     )
-                } else {
-                    _userMessage.tryEmit(chosenAnswer)
                 }
             }.onFailure { error ->
                 processingFeedbackHelper?.stopWorkingFeedback()
@@ -1332,11 +1342,13 @@ fun AyneScreenContent(
 
         // Detailed optical reading card (when available)
         val readResp = uiState.lastReadResponse
+        var showExtractedText by remember(readResp) { mutableStateOf(false) }
+
         if (readResp != null && !uiState.isBusy) {
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 14.dp)
+                    .padding(bottom = 12.dp)
                     .border(2.dp, AyneVibrantYellow, RoundedCornerShape(14.dp))
                     .semantics {
                         contentDescription = "Read Text Result. ${readResp.amharic.ifBlank { readResp.english }}"
@@ -1344,82 +1356,136 @@ fun AyneScreenContent(
                 color = AyneDarkCard,
                 shape = RoundedCornerShape(14.dp)
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    // Sign / Document Classification Badge
-                    if (!readResp.signType.isNullOrBlank() || !readResp.documentType.isNullOrBlank()) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    // Header: Type badge & Dismiss button
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(bottom = 8.dp)
+                            modifier = Modifier.weight(1f, fill = false)
                         ) {
                             Icon(
-                                imageVector = Icons.Filled.Info,
+                                imageVector = Icons.Filled.Description,
                                 contentDescription = null,
                                 tint = AyneVibrantYellow,
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(18.dp)
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = readResp.signType ?: readResp.documentType ?: "",
+                                text = readResp.signType ?: readResp.documentType ?: stringResource(R.string.read_text_title),
                                 color = AyneVibrantYellow,
-                                fontSize = 16.sp,
+                                fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold
+                            )
+                        }
+                        IconButton(
+                            onClick = { onAction(AyneAction.DismissResult) },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Close,
+                                contentDescription = stringResource(R.string.dismiss_result_desc),
+                                tint = AynePureWhite,
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }
 
                     // Spatial Location Context
                     if (!readResp.locationContext.isNullOrBlank()) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(bottom = 8.dp)
-                        ) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
                                 imageVector = Icons.Filled.LocationOn,
                                 contentDescription = null,
-                                tint = AynePureWhite,
-                                modifier = Modifier.size(18.dp)
+                                tint = AynePureWhite.copy(alpha = 0.8f),
+                                modifier = Modifier.size(15.dp)
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
                             Text(
                                 text = readResp.locationContext,
-                                color = AynePureWhite,
-                                fontSize = 14.sp,
+                                color = AynePureWhite.copy(alpha = 0.85f),
+                                fontSize = 13.sp,
                                 fontWeight = FontWeight.Medium
                             )
                         }
                     }
 
-                    // Spoken Reading Text
-                    Text(
-                        text = uiState.lastAnswer ?: readResp.amharic,
-                        color = AynePureWhite,
-                        fontSize = 17.sp,
-                        lineHeight = 24.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
+                    Spacer(modifier = Modifier.height(8.dp))
 
-                    // Extracted Verbatim Text (if different)
+                    // Spoken Reading Text (clean and scroll-constrained)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 110.dp)
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        Text(
+                            text = uiState.lastAnswer ?: readResp.amharic,
+                            color = AynePureWhite,
+                            fontSize = 16.sp,
+                            lineHeight = 22.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+
+                    // Extracted Verbatim Text (Collapsible drawer to prevent screen flooding)
                     if (!readResp.extractedText.isNullOrBlank() && readResp.extractedText != readResp.amharic) {
                         Spacer(modifier = Modifier.height(8.dp))
-                        Surface(
+                        OutlinedButton(
+                            onClick = { showExtractedText = !showExtractedText },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = AyneVibrantYellow),
                             shape = RoundedCornerShape(8.dp),
-                            color = AynePureBlack,
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(36.dp)
                         ) {
-                            Column(modifier = Modifier.padding(10.dp)) {
-                                Text(
-                                    text = stringResource(R.string.extracted_text_label),
-                                    color = AyneVibrantYellow,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Description,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(14.dp),
+                                    tint = AyneVibrantYellow
                                 )
-                                Spacer(modifier = Modifier.height(2.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = readResp.extractedText,
-                                    color = AynePureWhite.copy(alpha = 0.9f),
-                                    fontSize = 14.sp,
-                                    lineHeight = 20.sp
+                                    text = if (showExtractedText) stringResource(R.string.hide_verbatim_text)
+                                           else stringResource(R.string.view_verbatim_text),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = AyneVibrantYellow
                                 )
+                            }
+                        }
+
+                        if (showExtractedText) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = AynePureBlack,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 90.dp)
+                                    .border(1.dp, AyneVibrantYellow.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .padding(8.dp)
+                                        .verticalScroll(rememberScrollState())
+                                ) {
+                                    Text(
+                                        text = readResp.extractedText,
+                                        color = AynePureWhite.copy(alpha = 0.9f),
+                                        fontSize = 12.sp,
+                                        lineHeight = 16.sp
+                                    )
+                                }
                             }
                         }
                     }
@@ -1432,19 +1498,19 @@ fun AyneScreenContent(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .background(AyneVibrantYellow.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
-                                .padding(10.dp)
+                                .padding(8.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Filled.Warning,
                                 contentDescription = null,
                                 tint = AyneVibrantYellow,
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(16.dp)
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = readResp.cameraGuidance,
                                 color = AyneVibrantYellow,
-                                fontSize = 13.sp,
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Medium
                             )
                         }
@@ -1452,11 +1518,11 @@ fun AyneScreenContent(
                 }
             }
         } else if (!uiState.lastAnswer.isNullOrBlank() && !uiState.isBusy) {
-            // General description answer card
+            // General description answer card with dismiss button and bounded height
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 14.dp)
+                    .padding(bottom = 12.dp)
                     .border(1.dp, AyneVibrantYellow.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
                     .semantics {
                         contentDescription = "Last answer: ${uiState.lastAnswer}"
@@ -1465,20 +1531,51 @@ fun AyneScreenContent(
                 shape = RoundedCornerShape(12.dp)
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
-                    Text(
-                        text = uiState.lastAnswer ?: "",
-                        color = AynePureWhite,
-                        fontSize = 16.sp,
-                        lineHeight = 22.sp,
-                        fontWeight = FontWeight.Medium
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Surroundings",
+                            color = AyneVibrantYellow,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        IconButton(
+                            onClick = { onAction(AyneAction.DismissResult) },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Close,
+                                contentDescription = stringResource(R.string.dismiss_result_desc),
+                                tint = AynePureWhite,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 110.dp)
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        Text(
+                            text = uiState.lastAnswer ?: "",
+                            color = AynePureWhite,
+                            fontSize = 15.sp,
+                            lineHeight = 21.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
                     if (!uiState.lastEnglishAnswer.isNullOrBlank() && uiState.selectedLanguage == SupportedLanguage.AMHARIC) {
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
                             text = uiState.lastEnglishAnswer ?: "",
                             color = AynePureWhite.copy(alpha = 0.7f),
-                            fontSize = 13.sp,
-                            lineHeight = 18.sp
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp
                         )
                     }
                 }
