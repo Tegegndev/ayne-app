@@ -470,6 +470,7 @@ class AyneViewModel(
         viewModelScope.launch {
             val endpoint = state.apiEndpoint
             val voice = state.customVoice
+            val prefLang = if (state.selectedLanguage == SupportedLanguage.ENGLISH) "en" else "am"
             var receivedVision = false
             val audioChunks = StringBuilder()
 
@@ -483,6 +484,7 @@ class AyneViewModel(
                 history = emptyList(),
                 customVoice = voice,
                 ttsProvider = "addis",
+                preferredLanguage = prefLang,
                 mode = "general",
                 onVision = { visionEvent ->
                     receivedVision = true
@@ -551,6 +553,7 @@ class AyneViewModel(
                     history = emptyList(),
                     customVoice = voice,
                     ttsProvider = "addis",
+                    preferredLanguage = prefLang,
                     mode = "general",
                     includeAudio = true
                 )
@@ -664,6 +667,7 @@ class AyneViewModel(
         viewModelScope.launch {
             val endpoint = state.apiEndpoint
             val voice = state.customVoice
+            val prefLang = if (state.selectedLanguage == SupportedLanguage.ENGLISH) "en" else "am"
 
             // Turn 2+ Zero-Upload: If sessionId is cached, send ONLY sessionId! 0 image bytes uploaded!
             val sendSessionId = sid
@@ -680,6 +684,7 @@ class AyneViewModel(
                     history = emptyList(),
                     customVoice = voice,
                     ttsProvider = "addis",
+                    preferredLanguage = prefLang,
                     mode = "general",
                     includeAudio = true
                 )
@@ -751,6 +756,7 @@ class AyneViewModel(
                     history = state.conversationHistory.takeLast(6),
                     customVoice = voice,
                     ttsProvider = "addis",
+                    preferredLanguage = prefLang,
                     mode = "general",
                     onVision = { visionEvent ->
                         receivedVision = true
@@ -818,6 +824,7 @@ class AyneViewModel(
                         history = state.conversationHistory.takeLast(6),
                         customVoice = voice,
                         ttsProvider = "addis",
+                        preferredLanguage = prefLang,
                         mode = "general",
                         includeAudio = true
                     )

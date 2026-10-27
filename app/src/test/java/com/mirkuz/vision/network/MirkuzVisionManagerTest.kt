@@ -154,12 +154,15 @@ class MirkuzVisionManagerTest {
 
         val latch = CountDownLatch(1)
         var resultAmharic: String? = null
+        var resultEnglish: String? = null
 
         mgr.seeAndDescribe(
             newSnapshotBase64 = null,
             followUpQuestion = "የስኒው ቀለም ምን ይመስላል?",
-            onSuccess = { amharic, _ ->
+            preferredLanguage = "am",
+            onSuccess = { amharic, english ->
                 resultAmharic = amharic
+                resultEnglish = english
                 latch.countDown()
             },
             onError = { error ->
@@ -172,8 +175,49 @@ class MirkuzVisionManagerTest {
 
         assertTrue(body.contains("\"sessionId\":\"vis_sess_abc123\""))
         assertTrue(body.contains("\"query\":\"የስኒው ቀለም ምን ይመስላል?\""))
+        assertTrue(body.contains("\"preferredLanguage\":\"am\""))
         assertFalse("Follow-up should NEVER include imageBase64!", body.contains("imageBase64"))
         assertEquals("የስኒው ቀለም ነጭ ነው።", resultAmharic)
+        assertEquals("The cup is white.", resultEnglish)
+    }
+
+    @Test
+    fun testFallbackTranslationFieldResolutionWhenEnglishIsAlternateKey() {
+        // Test case where backend returns translation or description under alternative keys on follow-up
+        val mockResponseBody = """
+            {
+                "success": true,
+                "sessionId": "vis_sess_abc123",
+                "cleanSpeech": "ስኒው ነጭ ነው",
+                "translation": "The cup is white."
+            }
+        """.trimIndent()
+
+        val mgr = createManager { _ ->
+            Pair(mockResponseBody, "application/json")
+        }
+        mgr.setActiveSessionId("vis_sess_abc123")
+
+        val latch = CountDownLatch(1)
+        var resultAmharic: String? = null
+        var resultEnglish: String? = null
+
+        mgr.seeAndDescribe(
+            newSnapshotBase64 = null,
+            followUpQuestion = "ቀለሙስ?",
+            onSuccess = { amharic, english ->
+                resultAmharic = amharic
+                resultEnglish = english
+                latch.countDown()
+            },
+            onError = { error ->
+                fail("Request failed: $error")
+            }
+        )
+
+        assertTrue(latch.await(3, TimeUnit.SECONDS))
+        assertEquals("ስኒው ነጭ ነው", resultAmharic)
+        assertEquals("The cup is white.", resultEnglish)
     }
 
     @Test

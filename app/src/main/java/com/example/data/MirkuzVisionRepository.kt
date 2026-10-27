@@ -142,6 +142,7 @@ class MirkuzVisionRepository(
     fun seeAndDescribe(
         newImageBase64: String? = null,
         userQuestion: String? = null,
+        preferredLanguage: String = "am",
         onSuccess: (amharic: String, audioBase64: String?) -> Unit,
         onError: (String) -> Unit
     ) {
@@ -160,6 +161,7 @@ class MirkuzVisionRepository(
             }
             put("ttsProvider", "addis")
             put("customVoice", "am-hamen")
+            put("preferredLanguage", preferredLanguage)
             put("includeAudio", true)
         }
 

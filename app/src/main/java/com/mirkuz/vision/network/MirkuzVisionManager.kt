@@ -200,6 +200,7 @@ class MirkuzVisionManager(
     fun seeAndDescribe(
         newSnapshotBase64: String? = null,
         followUpQuestion: String? = null,
+        preferredLanguage: String = "am",
         onSuccess: (spokenAmharic: String, englishReasoning: String) -> Unit,
         onError: (String) -> Unit
     ) {
@@ -229,6 +230,7 @@ class MirkuzVisionManager(
             }
             put("customVoice", "am-hamen")
             put("ttsProvider", "addis")
+            put("preferredLanguage", preferredLanguage)
             put("includeAudio", true)
         }
 
@@ -254,10 +256,18 @@ class MirkuzVisionManager(
                         val amharicRaw = if (json.has("cleanSpeech")) {
                             json.optString("cleanSpeech")
                         } else {
-                            json.optString("amharic")
+                            json.optString("amharic").ifEmpty {
+                                json.optString("description").ifEmpty {
+                                    json.optString("text", "")
+                                }
+                            }
                         }
                         val amharicSpeech = amharicRaw.cleanPrefix()
-                        val englishReasoning = json.optString("english")
+                        val englishReasoning = json.optString("english").ifEmpty {
+                            json.optString("englishTranslation").ifEmpty {
+                                json.optString("translation", "")
+                            }
+                        }
                         val audioBase64 = json.optJSONObject("audio")?.optString("audioBase64")
 
                         if (!audioBase64.isNullOrEmpty()) {

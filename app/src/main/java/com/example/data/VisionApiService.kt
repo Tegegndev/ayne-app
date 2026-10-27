@@ -34,6 +34,7 @@ class VisionApiService(
         history: List<ConversationTurn> = emptyList(),
         customVoice: String = "am-hamen",
         ttsProvider: String = "addis",
+        preferredLanguage: String = "am",
         mode: String = "general",
         includeAudio: Boolean = true
     ): Result<VisionDescribeResponse> = withContext(Dispatchers.IO) {
@@ -62,6 +63,7 @@ class VisionApiService(
                 }
                 put("customVoice", customVoice)
                 put("ttsProvider", ttsProvider)
+                put("preferredLanguage", preferredLanguage)
                 put("mode", mode)
                 put("includeAudio", includeAudio)
 
@@ -123,6 +125,7 @@ class VisionApiService(
         history: List<ConversationTurn> = emptyList(),
         customVoice: String = "am-hamen",
         ttsProvider: String = "addis",
+        preferredLanguage: String = "am",
         mode: String = "general",
         onVision: (StreamVisionEvent) -> Unit,
         onAudioChunk: (StreamAudioChunkEvent) -> Unit,
@@ -161,6 +164,7 @@ class VisionApiService(
                 }
                 put("customVoice", customVoice)
                 put("ttsProvider", ttsProvider)
+                put("preferredLanguage", preferredLanguage)
                 put("mode", mode)
                 put("includeAudio", true)
 

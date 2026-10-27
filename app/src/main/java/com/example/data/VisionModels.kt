@@ -64,9 +64,20 @@ data class VisionDescribeResponse(
                 )
             }
 
-            val rawAmharic = root.optString("amharic", "")
+            val rawAmharic = root.optString("amharic").ifEmpty {
+                root.optString("cleanSpeech").ifEmpty {
+                    root.optString("text").ifEmpty {
+                        root.optString("description", "")
+                    }
+                }
+            }
             val cleanAmharic = rawAmharic.cleanLabelPrefix()
             val cleanSpeech = root.optString("cleanSpeech").takeIf { it.isNotEmpty() }?.cleanLabelPrefix()
+            val rawEnglish = root.optString("english").ifEmpty {
+                root.optString("englishTranslation").ifEmpty {
+                    root.optString("translation", "")
+                }
+            }
             val sessionId = root.optString("sessionId").ifEmpty { root.optString("chatId") }.takeIf { it.isNotBlank() && it != "null" }
 
             return VisionDescribeResponse(
@@ -74,7 +85,7 @@ data class VisionDescribeResponse(
                 sessionId = sessionId,
                 transcribedQuery = root.optString("transcribedQuery").takeIf { it.isNotEmpty() },
                 amharic = cleanAmharic,
-                english = root.optString("english", ""),
+                english = rawEnglish,
                 cleanSpeech = cleanSpeech,
                 audio = audioData,
                 metrics = metrics
