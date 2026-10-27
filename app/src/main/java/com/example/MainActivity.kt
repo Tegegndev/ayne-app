@@ -43,15 +43,13 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.BatteryFull
+import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.DirectionsWalk
 import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.NetworkCell
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -111,6 +109,7 @@ import com.example.ui.theme.AyneTheme
 import com.example.ui.theme.AyneVibrantYellow
 import com.example.util.AudioPlaybackHelper
 import com.example.util.CameraCaptureHelper
+import com.example.util.ProcessingFeedbackHelper
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -135,7 +134,6 @@ data class AyneUiState(
     val lastAnswer: String? = null,
     val lastEnglishAnswer: String? = null,
     val lastAudioBase64: String? = null,
-    val batteryPercentage: Int = 92,
     val isBusy: Boolean = false,
     val busyMessage: String? = null,
     val apiEndpoint: String = DEFAULT_ENDPOINT,
@@ -174,12 +172,19 @@ class AyneViewModel(
     private val visionApiService: VisionApiService = VisionApiService(),
     private val audioPlaybackHelper: AudioPlaybackHelper = AudioPlaybackHelper()
 ) : ViewModel() {
+    private var processingFeedbackHelper: ProcessingFeedbackHelper? = null
 
     private val _uiState = MutableStateFlow(AyneUiState())
     val uiState: StateFlow<AyneUiState> = _uiState.asStateFlow()
 
     private val _userMessage = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val userMessage: SharedFlow<String> = _userMessage.asSharedFlow()
+
+    fun initFeedbackHelper(context: Context) {
+        if (processingFeedbackHelper == null) {
+            processingFeedbackHelper = ProcessingFeedbackHelper(context.applicationContext)
+        }
+    }
 
     fun showMessage(msg: String) {
         _userMessage.tryEmit(msg)
@@ -244,6 +249,7 @@ class AyneViewModel(
             )
         }
         _userMessage.tryEmit(progressMsg)
+        processingFeedbackHelper?.startWorkingFeedback(viewModelScope)
 
         viewModelScope.launch {
             val endpoint = state.apiEndpoint
@@ -259,6 +265,7 @@ class AyneViewModel(
             )
 
             result.onSuccess { response ->
+                processingFeedbackHelper?.playSuccessTone()
                 val chosenAnswer = if (state.selectedLanguage == SupportedLanguage.ENGLISH && response.english.isNotBlank()) {
                     response.english
                 } else {
@@ -293,6 +300,7 @@ class AyneViewModel(
                     _userMessage.tryEmit(chosenAnswer)
                 }
             }.onFailure { error ->
+                processingFeedbackHelper?.stopWorkingFeedback()
                 _uiState.update {
                     it.copy(
                         isBusy = false,
@@ -325,6 +333,7 @@ class AyneViewModel(
 
     override fun onCleared() {
         super.onCleared()
+        processingFeedbackHelper?.release()
         audioPlaybackHelper.stop()
     }
 }
@@ -390,6 +399,10 @@ fun AyneAppScreen(
     val uiState by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
+
+    LaunchedEffect(context) {
+        viewModel.initFeedbackHelper(context)
+    }
 
     // CameraX instance
     val imageCapture = remember {
@@ -670,7 +683,6 @@ fun AyneScreenContent(
         // 1. Top Bar
         AyneTopBar(
             selectedLanguage = uiState.selectedLanguage,
-            batteryPercentage = uiState.batteryPercentage,
             onLanguageSelected = {
                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 onAction(AyneAction.SelectLanguage(it))
@@ -706,12 +718,20 @@ fun AyneScreenContent(
                         strokeWidth = 3.dp,
                         modifier = Modifier.size(24.dp)
                     )
-                    Spacer(modifier = Modifier.width(16.dp))
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+                        contentDescription = stringResource(R.string.working_sound_active),
+                        tint = AyneVibrantYellow,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
                     Text(
                         text = uiState.busyMessage ?: stringResource(R.string.analyzing_surroundings),
                         color = AyneVibrantYellow,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp
+                        fontSize = 15.sp,
+                        lineHeight = 20.sp
                     )
                 }
             }
@@ -808,13 +828,11 @@ fun AyneScreenContent(
 @Composable
 fun AyneTopBar(
     selectedLanguage: SupportedLanguage,
-    batteryPercentage: Int,
     onLanguageSelected: (SupportedLanguage) -> Unit,
     onSettingsClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val logoDesc = stringResource(R.string.logo_desc)
-    val batteryDesc = stringResource(R.string.battery_status_desc, batteryPercentage)
     val settingsDesc = stringResource(R.string.settings_button_desc)
 
     Row(
@@ -842,7 +860,7 @@ fun AyneTopBar(
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = Icons.Filled.DirectionsWalk,
+                    imageVector = Icons.AutoMirrored.Filled.DirectionsWalk,
                     contentDescription = null,
                     tint = AyneOnYellow,
                     modifier = Modifier.size(24.dp)
@@ -866,47 +884,20 @@ fun AyneTopBar(
             onLanguageSelected = onLanguageSelected
         )
 
-        // Right side: Settings gear + Signal & Battery
-        Row(
-            verticalAlignment = Alignment.CenterVertically
+        // Right side: Settings button
+        IconButton(
+            onClick = onSettingsClick,
+            modifier = Modifier
+                .size(44.dp)
+                .semantics { contentDescription = settingsDesc }
+                .testTag("settings_button")
         ) {
-            IconButton(
-                onClick = onSettingsClick,
-                modifier = Modifier
-                    .size(36.dp)
-                    .semantics { contentDescription = settingsDesc }
-                    .testTag("settings_button")
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Settings,
-                    contentDescription = null,
-                    tint = AyneVibrantYellow,
-                    modifier = Modifier.size(22.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.width(2.dp))
-
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.semantics {
-                    contentDescription = batteryDesc
-                }
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.NetworkCell,
-                    contentDescription = null,
-                    tint = AynePureWhite,
-                    modifier = Modifier.size(15.dp)
-                )
-                Spacer(modifier = Modifier.width(2.dp))
-                Icon(
-                    imageVector = Icons.Filled.BatteryFull,
-                    contentDescription = null,
-                    tint = AynePureWhite,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
+            Icon(
+                imageVector = Icons.Filled.Settings,
+                contentDescription = null,
+                tint = AyneVibrantYellow,
+                modifier = Modifier.size(26.dp)
+            )
         }
     }
 }
@@ -1079,7 +1070,7 @@ fun AyneBottomControls(
                 horizontalArrangement = Arrangement.Center
             ) {
                 Icon(
-                    imageVector = Icons.Filled.VolumeUp,
+                    imageVector = Icons.AutoMirrored.Filled.VolumeUp,
                     contentDescription = null,
                     tint = AyneOnYellow,
                     modifier = Modifier.size(30.dp)

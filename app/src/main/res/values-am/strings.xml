@@ -27,8 +27,9 @@
     <string name="mic_permission_granted">የማይክሮፎን ፈቃድ ተሰጥቷል። ለመስማት ዝግጁ ነው።</string>
     <string name="mic_permission_denied">በድምፅ ጥያቄ ለመጠየቅ የማይክሮፎን ፈቃድ ያስፈልጋል። እባክዎን ፈቃድ ይስጡ።</string>
     
-    <string name="analyzing_surroundings">ዙሪያውን እያጠና ነው... እባክዎን ካሜራውን ሳያንቀሳቅሱ ያቆዩ።</string>
-    <string name="reading_text_progress">ጽሑፉን እያነበበ ነው... እባክዎን ሳያንቀሳቅሱ ያቆዩ።</string>
+    <string name="analyzing_surroundings">ዙሪያውን እያጠና ነው… የድምፅ ምልክት በርቷል። እባክዎን ካሜራውን ሳያንቀሳቅሱ ያቆዩ።</string>
+    <string name="reading_text_progress">ጽሑፉን እያጠናና እያነበበ ነው… የድምፅ ምልክት በርቷል። እባክዎን ሳያንቀሳቅሱ ያቆዩ።</string>
+    <string name="working_sound_active">የሥራ ድምፅ ምልክት</string>
     
     <string name="permission_dialog_title">ፈቃድ ያስፈልጋል</string>
     <string name="permission_dialog_open_settings">ማስተካከያ ክፈት</string>
