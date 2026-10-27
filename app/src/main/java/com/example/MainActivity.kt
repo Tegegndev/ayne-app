@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.view.KeyEvent
+import android.view.MotionEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -109,6 +110,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewModelScope
 import com.example.data.ConversationTurn
+import com.example.data.cleanLabelPrefix
 import com.example.data.ReadTextResponse
 import com.example.data.VisionApiService
 import com.example.data.VisionDescribeResponse
@@ -148,6 +150,7 @@ data class AyneUiState(
     val lastAnswer: String? = null,
     val lastEnglishAnswer: String? = null,
     val lastAudioBase64: String? = null,
+    val activeSessionId: String? = null,
     val isBusy: Boolean = false,
     val busyMessage: String? = null,
     val isFrontCamera: Boolean = false,
@@ -218,9 +221,19 @@ class AyneViewModel(
     private var processingFeedbackHelper: ProcessingFeedbackHelper? = null
     private var voiceRecorderHelper: VoiceRecorderHelper? = null
     private var recordingJob: Job? = null
+    private var activeSessionId: String? = null
 
     private val _uiState = MutableStateFlow(AyneUiState())
     val uiState: StateFlow<AyneUiState> = _uiState.asStateFlow()
+
+    fun getActiveSessionId(): String? = activeSessionId
+
+    fun isSpeaking(): Boolean = audioPlaybackHelper.isPlaying
+
+    fun resetVisualSession() {
+        activeSessionId = null
+        _uiState.update { it.copy(activeSessionId = null) }
+    }
 
     private val _userMessage = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val userMessage: SharedFlow<String> = _userMessage.asSharedFlow()
@@ -252,7 +265,8 @@ class AyneViewModel(
 
     fun startVoiceRecording(context: Context) {
         val state = _uiState.value
-        if (state.lockedImageBase64 == null) {
+        val sid = activeSessionId ?: state.activeSessionId
+        if (state.lockedImageBase64 == null && sid == null) {
             val noSceneMsg = context.getString(R.string.no_scene_in_memory)
             _userMessage.tryEmit(noSceneMsg)
             playTapEarcon()
@@ -346,8 +360,10 @@ class AyneViewModel(
                 }
             }
             is AyneAction.ClearSession -> {
+                resetVisualSession()
                 _uiState.update {
                     it.copy(
+                        activeSessionId = null,
                         lockedImageBase64 = null,
                         lastCapturedBase64 = null,
                         lastReadResponse = null,
@@ -361,9 +377,10 @@ class AyneViewModel(
                 _userMessage.tryEmit("Scene cleared. Ready for fresh capture.")
             }
             is AyneAction.AskQuestion -> {
+                val sid = activeSessionId ?: _uiState.value.activeSessionId
                 if (_uiState.value.isRecordingVoice) {
                     stopAndSubmitVoiceRecording(context)
-                } else if (_uiState.value.lockedImageBase64 == null) {
+                } else if (_uiState.value.lockedImageBase64 == null && sid == null) {
                     _userMessage.tryEmit(context.getString(R.string.no_scene_in_memory))
                 } else {
                     startVoiceRecording(context)
@@ -405,9 +422,10 @@ class AyneViewModel(
                 _userMessage.tryEmit("Volume ▲: Capturing fresh surroundings...")
             }
             is AyneAction.VolumeFollowUpTriggered -> {
+                val sid = activeSessionId ?: _uiState.value.activeSessionId
                 if (_uiState.value.isRecordingVoice) {
                     stopAndSubmitVoiceRecording(context)
-                } else if (_uiState.value.lockedImageBase64 == null) {
+                } else if (_uiState.value.lockedImageBase64 == null && sid == null) {
                     _userMessage.tryEmit(context.getString(R.string.no_scene_in_memory))
                 } else {
                     startVoiceRecording(context)
@@ -419,7 +437,7 @@ class AyneViewModel(
     /**
      * Volume+ / Fresh capture:
      * 1. Snaps camera frame.
-     * 2. Resets conversation history (history.clear()).
+     * 2. Resets conversation history (history.clear()) & activeSessionId.
      * 3. Locks image in memory as lockedImageBase64.
      * 4. Describes surroundings out loud and updates rolling history.
      */
@@ -432,9 +450,11 @@ class AyneViewModel(
         val state = _uiState.value
         val progressMsg = context.getString(R.string.analyzing_surroundings)
 
-        // Reset history, lock image, and clear previous optical readings
+        // Reset history, activeSessionId, lock image, and clear previous optical readings
+        activeSessionId = null
         _uiState.update {
             it.copy(
+                activeSessionId = null,
                 isBusy = true,
                 busyMessage = progressMsg,
                 lockedImageBase64 = frameBase64,
@@ -457,19 +477,25 @@ class AyneViewModel(
             val streamResult = visionApiService.seeAndDescribeStream(
                 baseEndpointUrl = endpoint,
                 imageBase64 = frameBase64,
+                sessionId = null,
                 audioBase64 = null,
                 query = null,
                 history = emptyList(),
                 customVoice = voice,
+                ttsProvider = "addis",
                 mode = "general",
                 onVision = { visionEvent ->
                     receivedVision = true
+                    processingFeedbackHelper?.stopWorkingFeedback()
                     processingFeedbackHelper?.playSuccessTone()
+                    if (!visionEvent.sessionId.isNullOrBlank()) {
+                        activeSessionId = visionEvent.sessionId
+                    }
                     val chosenAnswer = if (state.selectedLanguage == SupportedLanguage.ENGLISH && visionEvent.english.isNotBlank()) {
                         visionEvent.english
                     } else {
                         visionEvent.amharic.ifBlank { visionEvent.english }
-                    }
+                    }.cleanLabelPrefix()
 
                     val initialHistory = listOf(
                         ConversationTurn("user", "Describe my surroundings"),
@@ -478,6 +504,7 @@ class AyneViewModel(
 
                     _uiState.update {
                         it.copy(
+                            activeSessionId = activeSessionId,
                             lastAnswer = chosenAnswer,
                             lastEnglishAnswer = visionEvent.english,
                             lastReadResponse = null,
@@ -518,21 +545,27 @@ class AyneViewModel(
                 val singleResult = visionApiService.seeAndDescribe(
                     endpointUrl = endpoint,
                     imageBase64 = frameBase64,
+                    sessionId = null,
                     audioBase64 = null,
                     query = null,
                     history = emptyList(),
                     customVoice = voice,
+                    ttsProvider = "addis",
                     mode = "general",
                     includeAudio = true
                 )
 
                 singleResult.onSuccess { response ->
+                    processingFeedbackHelper?.stopWorkingFeedback()
                     processingFeedbackHelper?.playSuccessTone()
+                    if (!response.sessionId.isNullOrBlank()) {
+                        activeSessionId = response.sessionId
+                    }
                     val chosenAnswer = if (state.selectedLanguage == SupportedLanguage.ENGLISH && response.english.isNotBlank()) {
                         response.english
                     } else {
                         response.amharic.ifBlank { response.english }
-                    }
+                    }.cleanLabelPrefix()
 
                     val initialHistory = listOf(
                         ConversationTurn("user", "Describe my surroundings"),
@@ -541,6 +574,7 @@ class AyneViewModel(
 
                     _uiState.update {
                         it.copy(
+                            activeSessionId = activeSessionId,
                             isBusy = false,
                             busyMessage = null,
                             lastAnswer = chosenAnswer,
@@ -587,9 +621,10 @@ class AyneViewModel(
 
     /**
      * Volume- / Multi-turn Visual Follow-up:
-     * 1. Does NOT take a new picture! Reuses lockedImageBase64.
-     * 2. Sends user voice/query + rolling conversationHistory to the backend.
-     * 3. Speaks answer aloud and appends turn to history.
+     * Turn 2+: Zero-Upload Visual Session Caching (sessionId):
+     * - Sends ONLY sessionId & query — 0 image bytes are uploaded!
+     * - Reuses server-cached image frame.
+     * - Total follow-up response time cut to ~2.8s.
      */
     fun executeFollowUpRequest(
         context: Context,
@@ -597,8 +632,18 @@ class AyneViewModel(
         textQuery: String?
     ) {
         val state = _uiState.value
+        val sid = activeSessionId ?: state.activeSessionId
         val lockedImage = state.lockedImageBase64
-        if (lockedImage == null) {
+
+        // Check for session reset command (e.g. "አዲስ ጀምር" / "start over")
+        val isResetCommand = textQuery?.contains("አዲስ ጀምር") == true ||
+                textQuery?.contains("start over", ignoreCase = true) == true
+        if (isResetCommand) {
+            onAction(context, AyneAction.ClearSession)
+            return
+        }
+
+        if (sid == null && lockedImage == null) {
             val noSceneMsg = context.getString(R.string.no_scene_in_memory)
             _userMessage.tryEmit(noSceneMsg)
             return
@@ -622,23 +667,33 @@ class AyneViewModel(
             var receivedVision = false
             val audioChunks = StringBuilder()
 
+            // Turn 2+ Zero-Upload: If sessionId is cached, send ONLY sessionId! 0 image bytes uploaded!
+            val sendImage = if (sid != null) null else lockedImage
+            val sendSessionId = sid
+
             // 1. Attempt streaming SSE follow-up
             val streamResult = visionApiService.seeAndDescribeStream(
                 baseEndpointUrl = endpoint,
-                imageBase64 = lockedImage, // REUSES locked image!
+                imageBase64 = sendImage,
+                sessionId = sendSessionId,
                 audioBase64 = voiceBase64,
                 query = textQuery,
-                history = state.conversationHistory, // PASSES conversation history!
+                history = state.conversationHistory,
                 customVoice = voice,
+                ttsProvider = "addis",
                 mode = "general",
                 onVision = { visionEvent ->
                     receivedVision = true
+                    processingFeedbackHelper?.stopWorkingFeedback()
                     processingFeedbackHelper?.playSuccessTone()
+                    if (!visionEvent.sessionId.isNullOrBlank()) {
+                        activeSessionId = visionEvent.sessionId
+                    }
                     val chosenAnswer = if (state.selectedLanguage == SupportedLanguage.ENGLISH && visionEvent.english.isNotBlank()) {
                         visionEvent.english
                     } else {
                         visionEvent.amharic.ifBlank { visionEvent.english }
-                    }
+                    }.cleanLabelPrefix()
 
                     val prompt = textQuery ?: "Voice question"
                     val updatedHistory = state.conversationHistory + listOf(
@@ -648,6 +703,7 @@ class AyneViewModel(
 
                     _uiState.update {
                         it.copy(
+                            activeSessionId = activeSessionId,
                             lastAnswer = chosenAnswer,
                             lastEnglishAnswer = visionEvent.english,
                             lastReadResponse = null,
@@ -686,22 +742,28 @@ class AyneViewModel(
             if (streamResult.isFailure && !receivedVision) {
                 val singleResult = visionApiService.seeAndDescribe(
                     endpointUrl = endpoint,
-                    imageBase64 = lockedImage, // REUSES locked image!
+                    imageBase64 = sendImage,
+                    sessionId = sendSessionId,
                     audioBase64 = voiceBase64,
                     query = textQuery,
-                    history = state.conversationHistory, // PASSES conversation history!
+                    history = state.conversationHistory,
                     customVoice = voice,
+                    ttsProvider = "addis",
                     mode = "general",
                     includeAudio = true
                 )
 
                 singleResult.onSuccess { response ->
+                    processingFeedbackHelper?.stopWorkingFeedback()
                     processingFeedbackHelper?.playSuccessTone()
+                    if (!response.sessionId.isNullOrBlank()) {
+                        activeSessionId = response.sessionId
+                    }
                     val chosenAnswer = if (state.selectedLanguage == SupportedLanguage.ENGLISH && response.english.isNotBlank()) {
                         response.english
                     } else {
                         response.amharic.ifBlank { response.english }
-                    }
+                    }.cleanLabelPrefix()
 
                     val userTurn = response.transcribedQuery?.takeIf { it.isNotBlank() } ?: textQuery ?: "Voice question"
                     val updatedHistory = state.conversationHistory + listOf(
@@ -711,6 +773,7 @@ class AyneViewModel(
 
                     _uiState.update {
                         it.copy(
+                            activeSessionId = activeSessionId,
                             isBusy = false,
                             busyMessage = null,
                             lastAnswer = chosenAnswer,
@@ -794,6 +857,7 @@ class AyneViewModel(
                 onOcr = { ocrEvent ->
                     receivedOcr = true
                     // Immediate acoustic feedback: stop pulsing tone and chime success
+                    processingFeedbackHelper?.stopWorkingFeedback()
                     processingFeedbackHelper?.playSuccessTone()
 
                     val response = ocrEvent.toReadTextResponse()
@@ -801,7 +865,7 @@ class AyneViewModel(
                         response.english
                     } else {
                         response.amharic.ifBlank { response.english }
-                    }
+                    }.cleanLabelPrefix()
 
                     val guidanceMsg = when {
                         !response.cameraGuidance.isNullOrBlank() -> response.cameraGuidance
@@ -865,12 +929,13 @@ class AyneViewModel(
                 )
 
                 singleResult.onSuccess { response ->
+                    processingFeedbackHelper?.stopWorkingFeedback()
                     processingFeedbackHelper?.playSuccessTone()
                     val chosenAnswer = if (prefLang == "en" && response.english.isNotBlank()) {
                         response.english
                     } else {
                         response.amharic.ifBlank { response.english }
-                    }
+                    }.cleanLabelPrefix()
 
                     val guidanceMsg = when {
                         !response.cameraGuidance.isNullOrBlank() -> response.cameraGuidance
@@ -983,6 +1048,16 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
+        // Screen Tap Barge-In: Immediately stop any currently playing speech on physical touch
+        if (ev?.action == MotionEvent.ACTION_DOWN) {
+            if (viewModel.isSpeaking()) {
+                viewModel.bargeIn()
+            }
+        }
+        return super.dispatchTouchEvent(ev)
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
@@ -1193,7 +1268,8 @@ fun AyneAppScreen(
         if (uiState.isRecordingVoice) {
             viewModel.stopAndSubmitVoiceRecording(context)
         } else {
-            if (uiState.lockedImageBase64 == null) {
+            val sid = uiState.activeSessionId
+            if (uiState.lockedImageBase64 == null && sid == null) {
                 viewModel.showMessage(context.getString(R.string.no_scene_in_memory))
                 viewModel.playTapEarcon()
             } else {
@@ -1204,7 +1280,7 @@ fun AyneAppScreen(
         }
     }
 
-    LaunchedEffect(onRegisterVolumeHandlers, uiState.isRecordingVoice, uiState.lockedImageBase64) {
+    LaunchedEffect(onRegisterVolumeHandlers, uiState.isRecordingVoice, uiState.lockedImageBase64, uiState.activeSessionId) {
         onRegisterVolumeHandlers?.invoke(
             { triggerDescribeSurroundings() },
             { triggerVolumeFollowUp() }
@@ -1692,7 +1768,8 @@ fun AyneScreenContent(
         var showFullPreviewDialog by remember { mutableStateOf(false) }
 
         if (previewBitmap != null && !uiState.isBusy) {
-            val isLocked = uiState.lockedImageBase64 != null
+            val isLocked = uiState.lockedImageBase64 != null || uiState.activeSessionId != null
+            val hasSession = uiState.activeSessionId != null
             val followUpCount = uiState.conversationHistory.count { it.role == "user" && it.text != "Describe my surroundings" }
             Surface(
                 modifier = Modifier
@@ -1744,6 +1821,8 @@ fun AyneScreenContent(
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
                                     text = when {
+                                        hasSession && followUpCount > 0 -> "Zero-Upload Session · $followUpCount follow-up${if (followUpCount > 1) "s" else ""}"
+                                        hasSession -> "Zero-Upload Session Active · Turn 2 ready"
                                         isLocked && followUpCount > 0 -> stringResource(R.string.scene_locked_badge, followUpCount)
                                         isLocked -> stringResource(R.string.scene_locked_initial)
                                         else -> stringResource(R.string.debug_preview_title)
@@ -1755,7 +1834,10 @@ fun AyneScreenContent(
                             }
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = "${previewBitmap.width}×${previewBitmap.height} · ${stringResource(R.string.debug_preview_tap_to_enlarge)}",
+                                text = when {
+                                    hasSession -> "Cached server-side · 0 image bytes on follow-up"
+                                    else -> "${previewBitmap.width}×${previewBitmap.height} · ${stringResource(R.string.debug_preview_tap_to_enlarge)}"
+                                },
                                 color = AynePureWhite.copy(alpha = 0.8f),
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Medium
@@ -1946,6 +2028,7 @@ fun AyneScreenContent(
             // Card 3: Ask Question (voice mode / visual follow-up)
             val askSubtitle = when {
                 uiState.isRecordingVoice -> "Recording… Tap to submit · ለመጨረስ ይጫኑ"
+                uiState.activeSessionId != null -> "Ask follow-up (0 upload bytes) · በተያዘው ምስል ላይ ጠይቅ"
                 uiState.lockedImageBase64 != null -> "Ask follow-up about scene · በተያዘው ምስል ላይ ጠይቅ"
                 else -> stringResource(R.string.ask_question_amharic) + " (Take photo first)"
             }

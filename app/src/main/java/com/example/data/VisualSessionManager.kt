@@ -21,6 +21,10 @@ class VisualSessionManager(
 ) {
     var apiUrl: String = "https://foul-crematorium-pjp6vpw46q65h665r-3000.app.github.dev/api/see-and-describe"
 
+    // Server-cached visual session ID for zero-upload follow-up turns
+    var activeSessionId: String? = null
+        private set
+
     // In-memory cache of the active camera frame and conversation history
     var lockedImageBase64: String? = null
         private set
@@ -30,7 +34,12 @@ class VisualSessionManager(
         lockedImageBase64 = base64
     }
 
+    fun setActiveSessionId(sessionId: String?) {
+        activeSessionId = sessionId
+    }
+
     fun clearSession() {
+        activeSessionId = null
         lockedImageBase64 = null
         conversationHistory.clear()
     }
@@ -40,12 +49,14 @@ class VisualSessionManager(
      */
     fun startNewSceneCapture(cameraBitmap: Bitmap, customVoice: String = "am-hamen") {
         conversationHistory.clear()
+        activeSessionId = null
         lockedImageBase64 = compressBitmapToBase64(cameraBitmap)
 
         val payload = JSONObject().apply {
             put("imageBase64", lockedImageBase64)
             put("mode", "general")
             put("customVoice", customVoice)
+            put("ttsProvider", "addis")
             put("includeAudio", true)
             put("history", JSONArray())
         }
@@ -58,12 +69,14 @@ class VisualSessionManager(
      */
     fun startNewScene(imageBase64: String, customVoice: String = "am-hamen") {
         conversationHistory.clear()
+        activeSessionId = null
         lockedImageBase64 = imageBase64
 
         val payload = JSONObject().apply {
             put("imageBase64", lockedImageBase64)
             put("mode", "general")
             put("customVoice", customVoice)
+            put("ttsProvider", "addis")
             put("includeAudio", true)
             put("history", JSONArray())
         }
@@ -73,14 +86,16 @@ class VisualSessionManager(
 
     /**
      * Volume- Action: Follow-up question on the existing image without new capture
+     * Turn 2+: Zero-Upload visual session caching (Sends ONLY sessionId, 0 image bytes!)
      */
     fun askFollowUpQuestion(
         userVoiceAudioBase64: String? = null,
         userTextQuery: String? = null,
         customVoice: String = "am-hamen"
     ) {
+        val currentSessionId = activeSessionId
         val image = lockedImageBase64
-        if (image == null) {
+        if (currentSessionId == null && image == null) {
             onError("No active scene in memory. Press Volume+ first to take a picture.")
             return
         }
@@ -95,9 +110,15 @@ class VisualSessionManager(
         }
 
         val payload = JSONObject().apply {
-            put("imageBase64", image) // REUSES existing image!
+            // Zero-Upload: If sessionId is cached, send ONLY sessionId! 0 image bytes!
+            if (currentSessionId != null) {
+                put("sessionId", currentSessionId)
+            } else {
+                put("imageBase64", image)
+            }
             put("history", historyArray)
             put("customVoice", customVoice)
+            put("ttsProvider", "addis")
             put("includeAudio", true)
             if (!userVoiceAudioBase64.isNullOrEmpty()) put("audioBase64", userVoiceAudioBase64)
             if (!userTextQuery.isNullOrEmpty()) put("query", userTextQuery)
@@ -123,7 +144,14 @@ class VisualSessionManager(
 
                 try {
                     val json = JSONObject(body)
-                    val amharic = json.optString("amharic", "")
+                    // Cache sessionId for subsequent zero-upload follow-up turns
+                    val sid = json.optString("sessionId").takeIf { it.isNotBlank() && it != "null" }
+                    if (sid != null) {
+                        activeSessionId = sid
+                    }
+
+                    val rawAmharic = json.optString("amharic", "")
+                    val amharic = rawAmharic.cleanLabelPrefix()
                     val transcribed = json.optString("transcribedQuery", "").takeIf { it.isNotBlank() }
                     val audioBase64 = json.optJSONObject("audio")?.optString("audioBase64")
 

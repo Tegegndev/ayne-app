@@ -24,13 +24,14 @@ class AudioPlaybackHelper {
 
     /**
      * Enqueue a real-time audio chunk for immediate sequential playback.
-     * Starts playback as soon as Chunk #1 arrives.
+     * Starts playback as soon as Chunk #1 arrives (~716ms after OCR).
      */
     @Synchronized
     fun enqueueAudioChunk(
         context: Context,
         rawBase64Chunk: String,
         format: String = "mp3",
+        onFirstChunkPlay: (() -> Unit)? = null,
         onError: ((String) -> Unit)? = null
     ) {
         try {
@@ -54,6 +55,7 @@ class AudioPlaybackHelper {
             chunkQueue.add(tempChunkFile)
 
             if (!isPlayingQueue) {
+                onFirstChunkPlay?.invoke()
                 playNextChunkInQueue(onError)
             }
         } catch (e: Exception) {

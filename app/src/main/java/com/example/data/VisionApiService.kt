@@ -23,20 +23,34 @@ class VisionApiService(
     /**
      * Dedicated Spatial Surroundings Describer (Single-pass)
      * POST /api/see-and-describe
+     * Supports Turn 1 (with image) and Turn 2+ (Zero-Upload with sessionId only)
      */
     suspend fun seeAndDescribe(
         endpointUrl: String,
-        imageBase64: String,
+        imageBase64: String? = null,
+        sessionId: String? = null,
         audioBase64: String? = null,
         query: String? = null,
         history: List<ConversationTurn> = emptyList(),
         customVoice: String = "am-hamen",
+        ttsProvider: String = "addis",
         mode: String = "general",
         includeAudio: Boolean = true
     ): Result<VisionDescribeResponse> = withContext(Dispatchers.IO) {
         try {
             val jsonPayload = JSONObject().apply {
-                put("imageBase64", imageBase64)
+                if (!sessionId.isNullOrBlank() && imageBase64.isNullOrBlank()) {
+                    // Turn 2+: Zero-Upload follow-up! Send ONLY sessionId
+                    put("sessionId", sessionId)
+                } else if (!imageBase64.isNullOrBlank()) {
+                    put("imageBase64", imageBase64)
+                    if (!sessionId.isNullOrBlank()) {
+                        put("sessionId", sessionId)
+                    }
+                } else if (!sessionId.isNullOrBlank()) {
+                    put("sessionId", sessionId)
+                }
+
                 if (!audioBase64.isNullOrBlank()) {
                     put("audioBase64", audioBase64)
                 }
@@ -44,6 +58,7 @@ class VisionApiService(
                     put("query", query)
                 }
                 put("customVoice", customVoice)
+                put("ttsProvider", ttsProvider)
                 put("mode", mode)
                 put("includeAudio", includeAudio)
 
@@ -86,17 +101,19 @@ class VisionApiService(
      * Ultra-Low Latency Streaming (SSE)
      * POST /api/see-and-describe/stream
      * Events:
-     * 1. event: vision -> amharic, english, visionLatencyMs (~500ms)
+     * 1. event: vision -> amharic, english, visionLatencyMs, sessionId
      * 2. event: audio_chunk -> chunk, format
      * 3. event: done
      */
     suspend fun seeAndDescribeStream(
         baseEndpointUrl: String,
-        imageBase64: String,
+        imageBase64: String? = null,
+        sessionId: String? = null,
         audioBase64: String? = null,
         query: String? = null,
         history: List<ConversationTurn> = emptyList(),
         customVoice: String = "am-hamen",
+        ttsProvider: String = "addis",
         mode: String = "general",
         onVision: (StreamVisionEvent) -> Unit,
         onAudioChunk: (StreamAudioChunkEvent) -> Unit,
@@ -112,7 +129,18 @@ class VisionApiService(
             }
 
             val jsonPayload = JSONObject().apply {
-                put("imageBase64", imageBase64)
+                if (!sessionId.isNullOrBlank() && imageBase64.isNullOrBlank()) {
+                    // Turn 2+: Zero-Upload follow-up! Send ONLY sessionId
+                    put("sessionId", sessionId)
+                } else if (!imageBase64.isNullOrBlank()) {
+                    put("imageBase64", imageBase64)
+                    if (!sessionId.isNullOrBlank()) {
+                        put("sessionId", sessionId)
+                    }
+                } else if (!sessionId.isNullOrBlank()) {
+                    put("sessionId", sessionId)
+                }
+
                 if (!audioBase64.isNullOrBlank()) {
                     put("audioBase64", audioBase64)
                 }
@@ -120,6 +148,7 @@ class VisionApiService(
                     put("query", query)
                 }
                 put("customVoice", customVoice)
+                put("ttsProvider", ttsProvider)
                 put("mode", mode)
                 put("includeAudio", true)
 
@@ -172,10 +201,12 @@ class VisionApiService(
                             "vision" -> {
                                 try {
                                     val obj = JSONObject(dataStr)
-                                    val amharic = obj.optString("amharic", "")
+                                    val rawAmharic = obj.optString("amharic", "")
+                                    val amharic = rawAmharic.cleanLabelPrefix()
                                     val english = obj.optString("english", "")
                                     val latency = if (obj.has("visionLatencyMs")) obj.optLong("visionLatencyMs") else null
-                                    onVision(StreamVisionEvent(amharic, english, latency))
+                                    val sid = obj.optString("sessionId").takeIf { it.isNotBlank() && it != "null" }
+                                    onVision(StreamVisionEvent(amharic, english, latency, sid))
                                 } catch (e: Exception) {
                                     // Ignore parse error on malformed chunk
                                 }
@@ -183,7 +214,11 @@ class VisionApiService(
                             "audio_chunk" -> {
                                 try {
                                     val obj = JSONObject(dataStr)
-                                    val chunk = obj.optString("chunk", "")
+                                    val chunk = obj.optString("chunk").ifEmpty {
+                                        obj.optString("chunkBase64").ifEmpty {
+                                            obj.optString("audioBase64")
+                                        }
+                                    }
                                     val format = obj.optString("format", "mp3")
                                     if (chunk.isNotEmpty()) {
                                         onAudioChunk(StreamAudioChunkEvent(chunk, format))
@@ -197,10 +232,12 @@ class VisionApiService(
                                 try {
                                     val obj = JSONObject(dataStr)
                                     if (obj.has("amharic")) {
-                                        val amharic = obj.optString("amharic", "")
+                                        val rawAmharic = obj.optString("amharic", "")
+                                        val amharic = rawAmharic.cleanLabelPrefix()
                                         val english = obj.optString("english", "")
                                         val latency = if (obj.has("visionLatencyMs")) obj.optLong("visionLatencyMs") else null
-                                        onVision(StreamVisionEvent(amharic, english, latency))
+                                        val sid = obj.optString("sessionId").takeIf { it.isNotBlank() && it != "null" }
+                                        onVision(StreamVisionEvent(amharic, english, latency, sid))
                                     }
                                 } catch (e: Exception) {
                                     // Ignore
@@ -276,7 +313,7 @@ class VisionApiService(
      * POST /api/read-text/stream (Alias: /api/read-text-and-signs/stream)
      * Events:
      * 1. event: ocr -> instant document card, locationContext, extracted text, isCutOff (~2.5s)
-     * 2. event: audio_chunk -> real-time Addis AI base64 MP3 chunks (~3.4s for Chunk #1)
+     * 2. event: audio_chunk -> real-time Addis AI base64 MP3 chunks (~716ms for Chunk #1)
      * 3. event: done -> stream finished
      * 4. event: error -> error payload
      */

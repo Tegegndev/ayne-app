@@ -2,6 +2,16 @@ package com.example.data
 
 import org.json.JSONObject
 
+/**
+ * Removes annoying "(አማርኛ)" and "(Amharic)" label prefixes from backend responses.
+ */
+fun String.cleanLabelPrefix(): String {
+    return this
+        .replace(Regex("^\\s*\\([\\s]*(?:አማርኛ|Amharic)[\\s]*\\)[\\s]*", RegexOption.IGNORE_CASE), "")
+        .replace(Regex("^\\s*(?:አማርኛ|Amharic)\\s*:\\s*", RegexOption.IGNORE_CASE), "")
+        .trim()
+}
+
 data class ConversationTurn(
     val role: String,
     val text: String
@@ -23,6 +33,7 @@ data class VisionMetrics(
 
 data class VisionDescribeResponse(
     val success: Boolean,
+    val sessionId: String? = null,
     val transcribedQuery: String?,
     val amharic: String,
     val english: String,
@@ -53,12 +64,18 @@ data class VisionDescribeResponse(
                 )
             }
 
+            val rawAmharic = root.optString("amharic", "")
+            val cleanAmharic = rawAmharic.cleanLabelPrefix()
+            val cleanSpeech = root.optString("cleanSpeech").takeIf { it.isNotEmpty() }?.cleanLabelPrefix()
+            val sessionId = root.optString("sessionId").takeIf { it.isNotBlank() && it != "null" }
+
             return VisionDescribeResponse(
                 success = root.optBoolean("success", true),
+                sessionId = sessionId,
                 transcribedQuery = root.optString("transcribedQuery").takeIf { it.isNotEmpty() },
-                amharic = root.optString("amharic", ""),
+                amharic = cleanAmharic,
                 english = root.optString("english", ""),
-                cleanSpeech = root.optString("cleanSpeech").takeIf { it.isNotEmpty() },
+                cleanSpeech = cleanSpeech,
                 audio = audioData,
                 metrics = metrics
             )
@@ -71,6 +88,7 @@ data class VisionDescribeResponse(
  */
 data class ReadTextResponse(
     val success: Boolean,
+    val sessionId: String? = null,
     val transcribedQuery: String?,
     val signType: String?,
     val documentType: String?,
@@ -109,11 +127,15 @@ data class ReadTextResponse(
                 )
             }
 
-            val spokenAmharic = root.optString("spokenAmharic").takeIf { it.isNotEmpty() && it != "null" }
-            val resolvedAmharic = spokenAmharic ?: root.optString("amharic", "")
+            val spokenAmharic = root.optString("spokenAmharic").takeIf { it.isNotEmpty() && it != "null" }?.cleanLabelPrefix()
+            val rawAmharic = spokenAmharic ?: root.optString("amharic", "")
+            val resolvedAmharic = rawAmharic.cleanLabelPrefix()
+            val cleanSpeech = root.optString("cleanSpeech").takeIf { it.isNotEmpty() && it != "null" }?.cleanLabelPrefix()
+            val sessionId = root.optString("sessionId").takeIf { it.isNotBlank() && it != "null" }
 
             return ReadTextResponse(
                 success = root.optBoolean("success", true),
+                sessionId = sessionId,
                 transcribedQuery = root.optString("transcribedQuery").takeIf { it.isNotEmpty() },
                 signType = root.optString("signType").takeIf { it.isNotEmpty() && it != "null" },
                 documentType = root.optString("documentType").takeIf { it.isNotEmpty() && it != "null" },
@@ -121,7 +143,7 @@ data class ReadTextResponse(
                 extractedText = root.optString("extractedText").takeIf { it.isNotEmpty() && it != "null" },
                 amharic = resolvedAmharic,
                 english = root.optString("english", ""),
-                cleanSpeech = root.optString("cleanSpeech").takeIf { it.isNotEmpty() && it != "null" },
+                cleanSpeech = cleanSpeech,
                 isLegible = root.optBoolean("isLegible", true),
                 isBlurry = root.optBoolean("isBlurry", false),
                 isCutOff = root.optBoolean("isCutOff", false),
@@ -139,7 +161,8 @@ data class ReadTextResponse(
 data class StreamVisionEvent(
     val amharic: String,
     val english: String,
-    val visionLatencyMs: Long?
+    val visionLatencyMs: Long?,
+    val sessionId: String? = null
 )
 
 data class StreamAudioChunkEvent(
@@ -152,6 +175,7 @@ data class StreamAudioChunkEvent(
  * Emitted immediately after single-pass OCR completes (~2.5s)
  */
 data class ReadTextOcrEvent(
+    val sessionId: String? = null,
     val signType: String?,
     val documentType: String?,
     val locationContext: String?,
@@ -167,11 +191,12 @@ data class ReadTextOcrEvent(
     val ocrLatencyMs: Long?
 ) {
     fun toReadTextResponse(): ReadTextResponse {
-        val resolvedAmharic = spokenAmharic?.takeIf { it.isNotEmpty() }
+        val resolvedAmharic = (spokenAmharic?.takeIf { it.isNotEmpty() }
             ?: amharic.takeIf { it.isNotEmpty() }
-            ?: cleanSpeech.orEmpty()
+            ?: cleanSpeech.orEmpty()).cleanLabelPrefix()
         return ReadTextResponse(
             success = true,
+            sessionId = sessionId,
             transcribedQuery = null,
             signType = signType,
             documentType = documentType,
@@ -192,15 +217,22 @@ data class ReadTextOcrEvent(
     companion object {
         fun fromJson(jsonStr: String): ReadTextOcrEvent {
             val root = JSONObject(jsonStr)
+            val spokenAmharic = root.optString("spokenAmharic").takeIf { it.isNotEmpty() && it != "null" }?.cleanLabelPrefix()
+            val rawAmharic = root.optString("amharic", "")
+            val cleanAmharic = rawAmharic.cleanLabelPrefix()
+            val cleanSpeech = root.optString("cleanSpeech").takeIf { it.isNotEmpty() && it != "null" }?.cleanLabelPrefix()
+            val sessionId = root.optString("sessionId").takeIf { it.isNotBlank() && it != "null" }
+
             return ReadTextOcrEvent(
+                sessionId = sessionId,
                 signType = root.optString("signType").takeIf { it.isNotEmpty() && it != "null" },
                 documentType = root.optString("documentType").takeIf { it.isNotEmpty() && it != "null" },
                 locationContext = root.optString("locationContext").takeIf { it.isNotEmpty() && it != "null" },
                 extractedText = root.optString("extractedText").takeIf { it.isNotEmpty() && it != "null" },
-                spokenAmharic = root.optString("spokenAmharic").takeIf { it.isNotEmpty() && it != "null" },
-                amharic = root.optString("amharic", ""),
+                spokenAmharic = spokenAmharic,
+                amharic = cleanAmharic,
                 english = root.optString("english", ""),
-                cleanSpeech = root.optString("cleanSpeech").takeIf { it.isNotEmpty() && it != "null" },
+                cleanSpeech = cleanSpeech,
                 isCutOff = root.optBoolean("isCutOff", false),
                 isBlurry = root.optBoolean("isBlurry", false),
                 isLegible = root.optBoolean("isLegible", true),
