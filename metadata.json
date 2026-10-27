@@ -1,0 +1,6 @@
+{
+  "name": "Ayne",
+  "description": "Accessibility companion app designed for blind and visually impaired users in Ethiopia with high-contrast WCAG AAA design, large touch targets, and assistive features.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

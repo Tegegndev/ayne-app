@@ -1,0 +1,33 @@
+<resources>
+    <string name="app_name">አይኔ</string>
+    <string name="app_tagline">የኢትዮጵያ የማየት እገዛ መተግበሪያ</string>
+    
+    <string name="describe_surroundings_title">ዙሪያውን አስረዳ</string>
+    <string name="describe_surroundings_amharic">ዙሪያውን አስረዳ</string>
+    <string name="describe_surroundings_desc">ዙሪያውን አስረዳ። ዙሪያዎን ለማየት እና ለማብራራት ይጫኑ።</string>
+    
+    <string name="read_text_title">ጽሑፍ አንብብ</string>
+    <string name="read_text_amharic">ጽሑፍ አንብብ</string>
+    <string name="read_text_desc">ጽሑፍ አንብብ። ጽሑፍን ቃኝቶ ለማንበብ ይጫኑ።</string>
+    
+    <string name="ask_question_title">ጠይቅ</string>
+    <string name="ask_question_amharic">ጠይቅ</string>
+    <string name="ask_question_desc">ጠይቅ። በድምፅ ጥያቄ ለመጠየቅ ይጫኑ።</string>
+    
+    <string name="repeat_last_answer">የመጨረሻውን ምላሽ ድገም</string>
+    <string name="repeat_last_answer_desc">የመጨረሻውን ምላሽ ድገም አዝራር</string>
+    
+    <string name="volume_hint_capture">ቅረጽ</string>
+    <string name="volume_hint_followup">ተከታይ ጥያቄ</string>
+    
+    <string name="snackbar_coming_soon">በቅርቡ ይጀምራል — ገና አልተገናኘም</string>
+    <string name="snackbar_no_answer">እስካሁን ምንም ምላሽ የለም</string>
+    
+    <string name="language_amharic">አማርኛ</string>
+    <string name="language_oromo">Afaan Oromoo</string>
+    <string name="language_english">English</string>
+    
+    <string name="battery_status_desc">የባትሪ መጠን %1$d በመቶ</string>
+    <string name="logo_desc">የአይኔ አርማ፡ በዱላ የሚጓዝ ሰው</string>
+    <string name="language_selector_desc">የቋንቋ መምረጫ። የተመረጠው %1$s።</string>
+</resources>

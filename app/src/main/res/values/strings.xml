@@ -1,0 +1,38 @@
+<resources>
+    <string name="app_name">Ayne</string>
+    <string name="app_tagline">Accessibility companion for Ethiopia</string>
+    
+    <!-- Action Cards -->
+    <string name="describe_surroundings_title">Describe Surroundings</string>
+    <string name="describe_surroundings_amharic">ዙሪያውን አስረዳ</string>
+    <string name="describe_surroundings_desc">Describe Surroundings. ዙሪያውን አስረዳ. Double tap to capture and describe your visual surroundings.</string>
+    
+    <string name="read_text_title">Read Text</string>
+    <string name="read_text_amharic">ጽሑፍ አንብብ</string>
+    <string name="read_text_desc">Read Text. ጽሑፍ አንብብ. Double tap to read text from books, labels, or signs.</string>
+    
+    <string name="ask_question_title">Ask Question</string>
+    <string name="ask_question_amharic">ጠይቅ</string>
+    <string name="ask_question_desc">Ask Question. ጠይቅ. Double tap to ask a question with your voice.</string>
+    
+    <!-- Bottom Controls -->
+    <string name="repeat_last_answer">Repeat last answer</string>
+    <string name="repeat_last_answer_desc">Repeat last answer. Double tap to replay the most recent audio explanation.</string>
+    
+    <string name="volume_hint_capture">capture</string>
+    <string name="volume_hint_followup">follow-up</string>
+    
+    <!-- Feedback Messages -->
+    <string name="snackbar_coming_soon">Coming soon — backend not connected</string>
+    <string name="snackbar_no_answer">No answer yet</string>
+    
+    <!-- Languages -->
+    <string name="language_amharic">አማርኛ</string>
+    <string name="language_oromo">Afaan Oromoo</string>
+    <string name="language_english">English</string>
+    
+    <!-- Accessibility Labels -->
+    <string name="battery_status_desc">Battery at %1$d percent</string>
+    <string name="logo_desc">Ayne logo: walking person with cane</string>
+    <string name="language_selector_desc">Language selector. Currently selected %1$s.</string>
+</resources>
