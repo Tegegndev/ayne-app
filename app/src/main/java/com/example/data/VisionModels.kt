@@ -81,6 +81,7 @@ data class ReadTextResponse(
     val cleanSpeech: String?,
     val isLegible: Boolean,
     val isBlurry: Boolean,
+    val isCutOff: Boolean = false,
     val cameraGuidance: String?,
     val audio: VisionAudioData?,
     val metrics: VisionMetrics?
@@ -108,18 +109,22 @@ data class ReadTextResponse(
                 )
             }
 
+            val spokenAmharic = root.optString("spokenAmharic").takeIf { it.isNotEmpty() && it != "null" }
+            val resolvedAmharic = spokenAmharic ?: root.optString("amharic", "")
+
             return ReadTextResponse(
                 success = root.optBoolean("success", true),
                 transcribedQuery = root.optString("transcribedQuery").takeIf { it.isNotEmpty() },
-                signType = root.optString("signType").takeIf { it.isNotEmpty() },
-                documentType = root.optString("documentType").takeIf { it.isNotEmpty() },
-                locationContext = root.optString("locationContext").takeIf { it.isNotEmpty() },
-                extractedText = root.optString("extractedText").takeIf { it.isNotEmpty() },
-                amharic = root.optString("amharic", ""),
+                signType = root.optString("signType").takeIf { it.isNotEmpty() && it != "null" },
+                documentType = root.optString("documentType").takeIf { it.isNotEmpty() && it != "null" },
+                locationContext = root.optString("locationContext").takeIf { it.isNotEmpty() && it != "null" },
+                extractedText = root.optString("extractedText").takeIf { it.isNotEmpty() && it != "null" },
+                amharic = resolvedAmharic,
                 english = root.optString("english", ""),
-                cleanSpeech = root.optString("cleanSpeech").takeIf { it.isNotEmpty() },
+                cleanSpeech = root.optString("cleanSpeech").takeIf { it.isNotEmpty() && it != "null" },
                 isLegible = root.optBoolean("isLegible", true),
                 isBlurry = root.optBoolean("isBlurry", false),
+                isCutOff = root.optBoolean("isCutOff", false),
                 cameraGuidance = root.optString("cameraGuidance").takeIf { it.isNotEmpty() && it != "null" },
                 audio = audioData,
                 metrics = metrics
@@ -141,3 +146,67 @@ data class StreamAudioChunkEvent(
     val chunkBase64: String,
     val format: String = "mp3"
 )
+
+/**
+ * OCR Metadata event from POST /api/read-text/stream
+ * Emitted immediately after single-pass OCR completes (~2.5s)
+ */
+data class ReadTextOcrEvent(
+    val signType: String?,
+    val documentType: String?,
+    val locationContext: String?,
+    val extractedText: String?,
+    val spokenAmharic: String?,
+    val amharic: String,
+    val english: String,
+    val cleanSpeech: String?,
+    val isCutOff: Boolean,
+    val isBlurry: Boolean,
+    val isLegible: Boolean,
+    val cameraGuidance: String?,
+    val ocrLatencyMs: Long?
+) {
+    fun toReadTextResponse(): ReadTextResponse {
+        val resolvedAmharic = spokenAmharic?.takeIf { it.isNotEmpty() }
+            ?: amharic.takeIf { it.isNotEmpty() }
+            ?: cleanSpeech.orEmpty()
+        return ReadTextResponse(
+            success = true,
+            transcribedQuery = null,
+            signType = signType,
+            documentType = documentType,
+            locationContext = locationContext,
+            extractedText = extractedText,
+            amharic = resolvedAmharic,
+            english = english,
+            cleanSpeech = cleanSpeech,
+            isLegible = isLegible,
+            isBlurry = isBlurry,
+            isCutOff = isCutOff,
+            cameraGuidance = cameraGuidance,
+            audio = null,
+            metrics = ocrLatencyMs?.let { VisionMetrics(visionLatencyMs = it, ttsLatencyMs = null, totalLatencyMs = null) }
+        )
+    }
+
+    companion object {
+        fun fromJson(jsonStr: String): ReadTextOcrEvent {
+            val root = JSONObject(jsonStr)
+            return ReadTextOcrEvent(
+                signType = root.optString("signType").takeIf { it.isNotEmpty() && it != "null" },
+                documentType = root.optString("documentType").takeIf { it.isNotEmpty() && it != "null" },
+                locationContext = root.optString("locationContext").takeIf { it.isNotEmpty() && it != "null" },
+                extractedText = root.optString("extractedText").takeIf { it.isNotEmpty() && it != "null" },
+                spokenAmharic = root.optString("spokenAmharic").takeIf { it.isNotEmpty() && it != "null" },
+                amharic = root.optString("amharic", ""),
+                english = root.optString("english", ""),
+                cleanSpeech = root.optString("cleanSpeech").takeIf { it.isNotEmpty() && it != "null" },
+                isCutOff = root.optBoolean("isCutOff", false),
+                isBlurry = root.optBoolean("isBlurry", false),
+                isLegible = root.optBoolean("isLegible", true),
+                cameraGuidance = root.optString("cameraGuidance").takeIf { it.isNotEmpty() && it != "null" },
+                ocrLatencyMs = if (root.has("ocrLatencyMs")) root.optLong("ocrLatencyMs") else null
+            )
+        }
+    }
+}

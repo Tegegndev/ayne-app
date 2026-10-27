@@ -89,4 +89,6 @@
     <string name="dismiss_result_desc">Dismiss result</string>
     <string name="view_verbatim_text">View Verbatim OCR Text · ሙሉ ጽሑፉን አሳይ</string>
     <string name="hide_verbatim_text">Hide Verbatim Text · ዝርዝር ጽሑፉን ደብቅ</string>
+    <string name="text_cut_off_warning">ጽሑፉ በከፊል ተቆርጧል፤ እባክዎ ካሜራውን ትንሽ ወደ ኋላ ያርቁት</string>
+    <string name="text_blurry_warning">ምስሉ ደብዛዛ ነው፤ እባክዎ ካሜራውን ሳያንቀሳቅሱ ያቆዩት</string>
 </resources>

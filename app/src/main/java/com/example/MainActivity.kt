@@ -489,6 +489,14 @@ class AyneViewModel(
                 },
                 onAudioChunk = { chunkEvent ->
                     audioChunks.append(chunkEvent.chunkBase64)
+                    audioPlaybackHelper.enqueueAudioChunk(
+                        context = context,
+                        rawBase64Chunk = chunkEvent.chunkBase64,
+                        format = chunkEvent.format,
+                        onError = { err ->
+                            _userMessage.tryEmit("Audio error: $err")
+                        }
+                    )
                 },
                 onDone = {
                     _uiState.update {
@@ -500,13 +508,7 @@ class AyneViewModel(
                     val fullAudio = audioChunks.toString()
                     if (fullAudio.isNotBlank()) {
                         _uiState.update { it.copy(lastAudioBase64 = fullAudio) }
-                        audioPlaybackHelper.playBase64Audio(
-                            context = context,
-                            rawBase64Audio = fullAudio,
-                            onError = { err ->
-                                _userMessage.tryEmit("Audio error: $err")
-                            }
-                        )
+                        audioPlaybackHelper.setLastConsolidatedAudio(context, fullAudio)
                     }
                 }
             )
@@ -656,6 +658,14 @@ class AyneViewModel(
                 },
                 onAudioChunk = { chunkEvent ->
                     audioChunks.append(chunkEvent.chunkBase64)
+                    audioPlaybackHelper.enqueueAudioChunk(
+                        context = context,
+                        rawBase64Chunk = chunkEvent.chunkBase64,
+                        format = chunkEvent.format,
+                        onError = { err ->
+                            _userMessage.tryEmit("Audio error: $err")
+                        }
+                    )
                 },
                 onDone = {
                     _uiState.update {
@@ -667,13 +677,7 @@ class AyneViewModel(
                     val fullAudio = audioChunks.toString()
                     if (fullAudio.isNotBlank()) {
                         _uiState.update { it.copy(lastAudioBase64 = fullAudio) }
-                        audioPlaybackHelper.playBase64Audio(
-                            context = context,
-                            rawBase64Audio = fullAudio,
-                            onError = { err ->
-                                _userMessage.tryEmit("Audio error: $err")
-                            }
-                        )
+                        audioPlaybackHelper.setLastConsolidatedAudio(context, fullAudio)
                     }
                 }
             )
@@ -773,68 +777,152 @@ class AyneViewModel(
             val endpoint = state.readTextEndpoint
             val voice = state.customVoice
             val prefLang = if (state.selectedLanguage == SupportedLanguage.ENGLISH) "en" else "am"
+            val ttsProvider = if (prefLang == "en") "gemini" else "addis"
 
-            val result = visionApiService.readText(
-                endpointUrl = endpoint,
+            var receivedOcr = false
+            val audioChunks = StringBuilder()
+
+            // 1. Connect to Realtime Addis AI Streaming SSE endpoint
+            val streamResult = visionApiService.readTextStream(
+                baseEndpointUrl = endpoint,
                 imageBase64 = frameBase64,
                 query = null,
                 audioBase64 = null,
                 customVoice = voice,
-                ttsProvider = if (prefLang == "en") "gemini" else "addis",
+                ttsProvider = ttsProvider,
                 preferredLanguage = prefLang,
-                includeAudio = true
-            )
+                onOcr = { ocrEvent ->
+                    receivedOcr = true
+                    // Immediate acoustic feedback: stop pulsing tone and chime success
+                    processingFeedbackHelper?.playSuccessTone()
 
-            result.onSuccess { response ->
-                processingFeedbackHelper?.playSuccessTone()
-                val chosenAnswer = if (prefLang == "en" && response.english.isNotBlank()) {
-                    response.english
-                } else {
-                    response.amharic.ifBlank { response.english }
-                }
+                    val response = ocrEvent.toReadTextResponse()
+                    val chosenAnswer = if (prefLang == "en" && response.english.isNotBlank()) {
+                        response.english
+                    } else {
+                        response.amharic.ifBlank { response.english }
+                    }
 
-                val guidanceMsg = when {
-                    !response.cameraGuidance.isNullOrBlank() -> response.cameraGuidance
-                    response.isBlurry == true -> "ምስሉ ደብዛዛ ነው፤ እባክዎ ካሜራውን ሳያንቀሳቅሱ ያቆዩት"
-                    response.isLegible == false -> "ጽሑፉ በግልጽ አይታይም፤ እባክዎ ካሜራውን ወደ ጽሑፉ ያቅርቡ"
-                    else -> null
-                }
-                if (!guidanceMsg.isNullOrBlank()) {
-                    _userMessage.tryEmit(guidanceMsg)
-                }
+                    val guidanceMsg = when {
+                        !response.cameraGuidance.isNullOrBlank() -> response.cameraGuidance
+                        response.isCutOff -> context.getString(R.string.text_cut_off_warning)
+                        response.isBlurry -> context.getString(R.string.text_blurry_warning)
+                        !response.isLegible -> "ጽሑፉ በግልጽ አይታይም፤ እባክዎ ካሜራውን ወደ ጽሑፉ ያቅርቡ"
+                        else -> null
+                    }
+                    if (!guidanceMsg.isNullOrBlank()) {
+                        _userMessage.tryEmit(guidanceMsg)
+                    }
 
-                _uiState.update {
-                    it.copy(
-                        isBusy = false,
-                        busyMessage = null,
-                        lastAnswer = chosenAnswer,
-                        lastEnglishAnswer = response.english,
-                        lastAudioBase64 = response.audio?.audioBase64,
-                        lastReadResponse = response,
-                        lastResponse = null
-                    )
-                }
-
-                val rawAudio = response.audio?.audioBase64
-                if (!rawAudio.isNullOrBlank()) {
-                    audioPlaybackHelper.playBase64Audio(
+                    _uiState.update {
+                        it.copy(
+                            lastAnswer = chosenAnswer,
+                            lastEnglishAnswer = response.english,
+                            lastReadResponse = response,
+                            lastResponse = null,
+                            busyMessage = null
+                        )
+                    }
+                },
+                onAudioChunk = { chunkEvent ->
+                    audioChunks.append(chunkEvent.chunkBase64)
+                    // Play audio chunk through speaker right away (~700ms after OCR)
+                    audioPlaybackHelper.enqueueAudioChunk(
                         context = context,
-                        rawBase64Audio = rawAudio,
+                        rawBase64Chunk = chunkEvent.chunkBase64,
+                        format = chunkEvent.format,
                         onError = { err ->
                             _userMessage.tryEmit("Audio error: $err")
                         }
                     )
+                },
+                onDone = {
+                    _uiState.update {
+                        it.copy(
+                            isBusy = false,
+                            busyMessage = null
+                        )
+                    }
+                    val fullAudio = audioChunks.toString()
+                    if (fullAudio.isNotBlank()) {
+                        _uiState.update { it.copy(lastAudioBase64 = fullAudio) }
+                        audioPlaybackHelper.setLastConsolidatedAudio(context, fullAudio)
+                    }
                 }
-            }.onFailure { error ->
-                processingFeedbackHelper?.stopWorkingFeedback()
+            )
+
+            // 2. If streaming failed before OCR, fallback to single-pass buffered REST
+            if (streamResult.isFailure && !receivedOcr) {
+                val singleResult = visionApiService.readText(
+                    endpointUrl = endpoint,
+                    imageBase64 = frameBase64,
+                    query = null,
+                    audioBase64 = null,
+                    customVoice = voice,
+                    ttsProvider = ttsProvider,
+                    preferredLanguage = prefLang,
+                    includeAudio = true
+                )
+
+                singleResult.onSuccess { response ->
+                    processingFeedbackHelper?.playSuccessTone()
+                    val chosenAnswer = if (prefLang == "en" && response.english.isNotBlank()) {
+                        response.english
+                    } else {
+                        response.amharic.ifBlank { response.english }
+                    }
+
+                    val guidanceMsg = when {
+                        !response.cameraGuidance.isNullOrBlank() -> response.cameraGuidance
+                        response.isCutOff -> context.getString(R.string.text_cut_off_warning)
+                        response.isBlurry -> context.getString(R.string.text_blurry_warning)
+                        !response.isLegible -> "ጽሑፉ በግልጽ አይታይም፤ እባክዎ ካሜራውን ወደ ጽሑፉ ያቅርቡ"
+                        else -> null
+                    }
+                    if (!guidanceMsg.isNullOrBlank()) {
+                        _userMessage.tryEmit(guidanceMsg)
+                    }
+
+                    _uiState.update {
+                        it.copy(
+                            isBusy = false,
+                            busyMessage = null,
+                            lastAnswer = chosenAnswer,
+                            lastEnglishAnswer = response.english,
+                            lastAudioBase64 = response.audio?.audioBase64,
+                            lastReadResponse = response,
+                            lastResponse = null
+                        )
+                    }
+
+                    val rawAudio = response.audio?.audioBase64
+                    if (!rawAudio.isNullOrBlank()) {
+                        audioPlaybackHelper.playBase64Audio(
+                            context = context,
+                            rawBase64Audio = rawAudio,
+                            onError = { err ->
+                                _userMessage.tryEmit("Audio error: $err")
+                            }
+                        )
+                    }
+                }.onFailure { error ->
+                    processingFeedbackHelper?.stopWorkingFeedback()
+                    _uiState.update {
+                        it.copy(
+                            isBusy = false,
+                            busyMessage = null
+                        )
+                    }
+                    val errMsg = error.localizedMessage ?: "Network error connecting to $endpoint"
+                    _userMessage.tryEmit("Error: $errMsg")
+                }
+            } else if (streamResult.isFailure && receivedOcr) {
                 _uiState.update {
                     it.copy(
                         isBusy = false,
                         busyMessage = null
                     )
                 }
-                val errMsg = error.localizedMessage ?: "Network error connecting to $endpoint"
-                _userMessage.tryEmit("Error: $errMsg")
             }
         }
     }
@@ -1491,13 +1579,20 @@ fun AyneScreenContent(
                     }
 
                     // Camera Guidance alert if cut off or blurry
-                    if (!readResp.cameraGuidance.isNullOrBlank()) {
+                    val guidanceAlert = when {
+                        !readResp.cameraGuidance.isNullOrBlank() -> readResp.cameraGuidance
+                        readResp.isCutOff -> stringResource(R.string.text_cut_off_warning)
+                        readResp.isBlurry -> stringResource(R.string.text_blurry_warning)
+                        else -> null
+                    }
+                    if (!guidanceAlert.isNullOrBlank()) {
                         Spacer(modifier = Modifier.height(8.dp))
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .background(AyneVibrantYellow.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
+                                .border(1.dp, AyneVibrantYellow, RoundedCornerShape(8.dp))
                                 .padding(8.dp)
                         ) {
                             Icon(
@@ -1508,10 +1603,10 @@ fun AyneScreenContent(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = readResp.cameraGuidance,
+                                text = guidanceAlert,
                                 color = AyneVibrantYellow,
                                 fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
                     }
