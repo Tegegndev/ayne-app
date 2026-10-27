@@ -31,6 +31,13 @@
     <string name="reading_text_progress">ጽሑፉን እያጠናና እያነበበ ነው… የድምፅ ምልክት በርቷል። እባክዎን ሳያንቀሳቅሱ ያቆዩ።</string>
     <string name="working_sound_active">የሥራ ድምፅ ምልክት</string>
     
+    <!-- Camera Flip -->
+    <string name="flip_camera_desc">ካሜራ ቀይር። አሁን አገልግሎት ላይ ያለው %1$s ካሜራ ነው።</string>
+    <string name="camera_front">የፊት</string>
+    <string name="camera_back">የኋላ</string>
+    <string name="camera_switched_front">የፊት ካሜራ በርቷል</string>
+    <string name="camera_switched_back">የኋላ ካሜራ በርቷል</string>
+    
     <string name="permission_dialog_title">ፈቃድ ያስፈልጋል</string>
     <string name="permission_dialog_open_settings">ማስተካከያ ክፈት</string>
     <string name="permission_dialog_dismiss">ዝጋ</string>
@@ -47,7 +54,6 @@
     <string name="language_oromo">Afaan Oromoo</string>
     <string name="language_english">English</string>
     
-    <string name="battery_status_desc">የባትሪ መጠን %1$d በመቶ</string>
     <string name="logo_desc">የአይኔ አርማ፡ በዱላ የሚጓዝ ሰው</string>
     <string name="language_selector_desc">የቋንቋ መምረጫ። የተመረጠው %1$s።</string>
 </resources>

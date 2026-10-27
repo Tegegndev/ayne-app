@@ -34,6 +34,13 @@
     <string name="reading_text_progress">Analyzing and reading text… Processing audio tone active. Please hold steady.</string>
     <string name="working_sound_active">Working tone playing</string>
     
+    <!-- Camera Flip -->
+    <string name="flip_camera_desc">Flip camera. Currently using %1$s camera.</string>
+    <string name="camera_front">front</string>
+    <string name="camera_back">back</string>
+    <string name="camera_switched_front">Switched to front camera</string>
+    <string name="camera_switched_back">Switched to back camera</string>
+    
     <!-- Permission Dialog -->
     <string name="permission_dialog_title">Permission Required</string>
     <string name="permission_dialog_open_settings">Open Settings</string>
@@ -54,7 +61,6 @@
     <string name="language_english">English</string>
     
     <!-- Accessibility Labels -->
-    <string name="battery_status_desc">Battery at %1$d percent</string>
     <string name="logo_desc">Ayne logo: walking person with cane</string>
     <string name="language_selector_desc">Language selector. Currently selected %1$s.</string>
 </resources>

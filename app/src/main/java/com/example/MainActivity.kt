@@ -39,12 +39,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PhotoCamera
@@ -136,6 +136,7 @@ data class AyneUiState(
     val lastAudioBase64: String? = null,
     val isBusy: Boolean = false,
     val busyMessage: String? = null,
+    val isFrontCamera: Boolean = false,
     val apiEndpoint: String = DEFAULT_ENDPOINT,
     val customVoice: String = "am-hamen",
     val lastResponse: VisionDescribeResponse? = null
@@ -158,6 +159,7 @@ sealed interface AyneAction {
     data object AskQuestion : AyneAction
     data object RepeatLastAnswer : AyneAction
     data class SelectLanguage(val language: SupportedLanguage) : AyneAction
+    data object FlipCamera : AyneAction
     data class UpdateApiEndpoint(val newUrl: String) : AyneAction
     data class UpdateVoice(val voiceId: String) : AyneAction
     data object VolumeCaptureTriggered : AyneAction
@@ -207,6 +209,16 @@ class AyneViewModel(
             is AyneAction.SelectLanguage -> {
                 _uiState.update { it.copy(selectedLanguage = action.language) }
                 _userMessage.tryEmit("Language: ${action.language.displayName}")
+            }
+            is AyneAction.FlipCamera -> {
+                val newIsFront = !_uiState.value.isFrontCamera
+                _uiState.update { it.copy(isFrontCamera = newIsFront) }
+                val feedback = if (newIsFront) {
+                    context.getString(R.string.camera_switched_front)
+                } else {
+                    context.getString(R.string.camera_switched_back)
+                }
+                _userMessage.tryEmit(feedback)
             }
             is AyneAction.UpdateApiEndpoint -> {
                 val cleaned = action.newUrl.trim()
@@ -411,12 +423,17 @@ fun AyneAppScreen(
             .build()
     }
 
-    // Bind CameraX on start
-    LaunchedEffect(lifecycleOwner) {
+    // Bind CameraX dynamically according to isFrontCamera state
+    val cameraSelector = if (uiState.isFrontCamera) {
+        CameraSelector.DEFAULT_FRONT_CAMERA
+    } else {
+        CameraSelector.DEFAULT_BACK_CAMERA
+    }
+
+    LaunchedEffect(lifecycleOwner, uiState.isFrontCamera) {
         try {
             val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
             val cameraProvider = cameraProviderFuture.get()
-            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
             if (cameraProvider.hasCamera(cameraSelector)) {
                 cameraProvider.unbindAll()
                 cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, imageCapture)
@@ -564,6 +581,10 @@ fun AyneAppScreen(
                     viewModel.onAction(context, AyneAction.AskQuestion)
                 }
             },
+            onFlipCamera = {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                viewModel.onAction(context, AyneAction.FlipCamera)
+            },
             onSettingsClick = { showSettingsDialog = true },
             modifier = Modifier.padding(innerPadding)
         )
@@ -666,6 +687,7 @@ fun AyneScreenContent(
     onDescribeClick: () -> Unit,
     onReadTextClick: () -> Unit,
     onAskQuestionClick: () -> Unit,
+    onFlipCamera: () -> Unit,
     onSettingsClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -680,13 +702,15 @@ fun AyneScreenContent(
             .verticalScroll(scrollState),
         verticalArrangement = Arrangement.SpaceBetween
     ) {
-        // 1. Top Bar
+        // 1. Top Bar with Flip Camera & Settings
         AyneTopBar(
             selectedLanguage = uiState.selectedLanguage,
+            isFrontCamera = uiState.isFrontCamera,
             onLanguageSelected = {
                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 onAction(AyneAction.SelectLanguage(it))
             },
+            onFlipCamera = onFlipCamera,
             onSettingsClick = onSettingsClick
         )
 
@@ -828,12 +852,19 @@ fun AyneScreenContent(
 @Composable
 fun AyneTopBar(
     selectedLanguage: SupportedLanguage,
+    isFrontCamera: Boolean,
     onLanguageSelected: (SupportedLanguage) -> Unit,
+    onFlipCamera: () -> Unit,
     onSettingsClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val logoDesc = stringResource(R.string.logo_desc)
     val settingsDesc = stringResource(R.string.settings_button_desc)
+    val cameraSideName = if (isFrontCamera) {
+        stringResource(R.string.camera_front)
+    } else {
+        stringResource(R.string.camera_back)
+    }
 
     Row(
         modifier = modifier
@@ -884,20 +915,40 @@ fun AyneTopBar(
             onLanguageSelected = onLanguageSelected
         )
 
-        // Right side: Settings button
-        IconButton(
-            onClick = onSettingsClick,
-            modifier = Modifier
-                .size(44.dp)
-                .semantics { contentDescription = settingsDesc }
-                .testTag("settings_button")
-        ) {
-            Icon(
-                imageVector = Icons.Filled.Settings,
-                contentDescription = null,
-                tint = AyneVibrantYellow,
-                modifier = Modifier.size(26.dp)
-            )
+        // Right side: Camera Flip & Settings buttons
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            val flipDesc = stringResource(R.string.flip_camera_desc, cameraSideName)
+            IconButton(
+                onClick = onFlipCamera,
+                modifier = Modifier
+                    .size(44.dp)
+                    .semantics {
+                        contentDescription = flipDesc
+                    }
+                    .testTag("flip_camera_button")
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Cameraswitch,
+                    contentDescription = null,
+                    tint = if (isFrontCamera) AynePureWhite else AyneVibrantYellow,
+                    modifier = Modifier.size(26.dp)
+                )
+            }
+
+            IconButton(
+                onClick = onSettingsClick,
+                modifier = Modifier
+                    .size(44.dp)
+                    .semantics { contentDescription = settingsDesc }
+                    .testTag("settings_button")
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Settings,
+                    contentDescription = null,
+                    tint = AyneVibrantYellow,
+                    modifier = Modifier.size(26.dp)
+                )
+            }
         }
     }
 }
@@ -1293,6 +1344,7 @@ fun AyneAppScreenPreview() {
             onDescribeClick = {},
             onReadTextClick = {},
             onAskQuestionClick = {},
+            onFlipCamera = {},
             onSettingsClick = {}
         )
     }

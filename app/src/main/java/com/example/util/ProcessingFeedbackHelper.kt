@@ -98,7 +98,7 @@ class ProcessingFeedbackHelper(private val context: Context) {
         loopJob = scope.launch(Dispatchers.Default) {
             try {
                 while (isActive) {
-                    delay(800)
+                    delay(1500)
                     if (isActive) {
                         pulseAudioAndHaptic()
                     }
