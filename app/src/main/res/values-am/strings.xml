@@ -67,7 +67,11 @@
 
     <!-- Multi-Turn Visual Follow-Up -->
     <string name="no_scene_in_memory">ምንም የተቀመጠ ምስል የለም፤ መጀመሪያ ድምጽ + ቁልፍን ወይም ዙሪያውን አስረዳን ይጫኑ።</string>
-    <string name="recording_voice_prompt">እያዳመጠ ነው… ተከታይ ጥያቄዎን ይናገሩ። ለመጨረስ ድምጽ - ወይም ማያ ገጹን ይጫኑ።</string>
+    <string name="recording_voice_prompt">እያዳመጥኩ ነው… ጥያቄዎን ይናገሩ፤ ስላለ ስታቆም በራሱ ይላካል።</string>
+    <string name="recording_voice_heard_speech">ተሰምቷል… ስታቆም እልካለሁ</string>
+    <string name="you_said_transcript">እርስዎ፦ %1$s</string>
+    <string name="question_answer_title">ጥያቄ እና መልስ</string>
+    <string name="surroundings_title">አካባቢ</string>
     <string name="recording_voice_active">የማይክሮፎን ድምፅ ቅጂ በርቷል</string>
     <string name="scene_locked_badge">ምስል ተይዟል · %1$d ተከታታይ ጥያቄዎች</string>
     <string name="scene_locked_initial">ምስል ተይዟል · ለተከታይ ጥያቄ ዝግጁ</string>

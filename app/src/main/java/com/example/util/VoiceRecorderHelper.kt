@@ -15,16 +15,15 @@ class VoiceRecorderHelper(private val context: Context) {
         get() = isCurrentlyRecording
 
     /**
-     * Returns the maximum absolute amplitude sampled since the last call.
-     * Returns 0 if not currently recording or on error.
+     * Live mic amplitude (0–32767) polled by the Voice Activity Detector (VAD).
+     * Returns 0 when no recording session is active.
      */
-    fun getMaxAmplitude(): Int {
-        return try {
+    val currentAmplitude: Int
+        get() = try {
             if (isCurrentlyRecording) mediaRecorder?.maxAmplitude ?: 0 else 0
         } catch (e: Exception) {
             0
         }
-    }
 
     fun startRecording(): Boolean {
         if (isCurrentlyRecording) return false

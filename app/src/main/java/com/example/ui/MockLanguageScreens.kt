@@ -139,7 +139,11 @@ fun EnglishMockScreen(
                         .border(2.dp, AyneVibrantYellow, RoundedCornerShape(12.dp))
                         .semantics {
                             role = Role.Button
-                            contentDescription = "Microphone recording active. Tap or press Volume Down to finish recording and submit follow-up question."
+                            contentDescription = if (uiState.liveTranscription != null) {
+                                "Heard: ${uiState.liveTranscription}. Tap to submit."
+                            } else {
+                                "Microphone listening. Speak your question; it submits automatically when you pause."
+                            }
                         }
                         .testTag("card_recording_voice_active_en"),
                     color = AyneDarkCard,
@@ -153,24 +157,37 @@ fun EnglishMockScreen(
                             modifier = Modifier
                                 .size(36.dp)
                                 .clip(CircleShape)
-                                .background(AyneVibrantYellow),
+                                .background(if (uiState.heardSpeech) AynePureWhite else AyneVibrantYellow),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Filled.Mic,
                                 contentDescription = null,
-                                tint = AyneOnYellow,
+                                tint = if (uiState.heardSpeech) AynePureBlack else AyneOnYellow,
                                 modifier = Modifier.size(22.dp)
                             )
                         }
                         Spacer(modifier = Modifier.width(12.dp))
-                        Text(
-                            text = "Listening… Speak your question. Tap to submit.",
-                            color = AyneVibrantYellow,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            lineHeight = 18.sp
-                        )
+                        Column {
+                            Text(
+                                text = if (uiState.heardSpeech) "Heard you… Submitting when you pause"
+                                       else "Listening… Speak your question. It submits automatically when you pause.",
+                                color = AyneVibrantYellow,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                lineHeight = 18.sp
+                            )
+                            if (!uiState.liveTranscription.isNullOrBlank()) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "You said: ${uiState.liveTranscription}",
+                                    color = AynePureWhite,
+                                    fontSize = 14.sp,
+                                    lineHeight = 19.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -269,10 +286,11 @@ fun EnglishMockScreen(
                         }
                     }
                 }
-            } else if (!uiState.lastAnswer.isNullOrBlank() && !uiState.isBusy && !uiState.isCompanionMode) {
-                // 5. Visual Description Result Card
+            } else if (!uiState.lastAnswer.isNullOrBlank() && !uiState.isBusy) {
+                // 5. Visual Description / Q&A Result Card
                 val displayAnswer = uiState.lastEnglishAnswer?.takeIf { it.isNotBlank() } ?: uiState.lastAnswer ?: ""
                 val secondaryAmharic = if (uiState.lastEnglishAnswer?.isNotBlank() == true) uiState.lastAnswer else null
+                val hasTranscript = !uiState.liveTranscription.isNullOrBlank()
 
                 Surface(
                     modifier = Modifier
@@ -280,7 +298,11 @@ fun EnglishMockScreen(
                         .padding(bottom = 14.dp)
                         .border(1.dp, AyneVibrantYellow.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
                         .semantics {
-                            contentDescription = "Last answer: $displayAnswer"
+                            contentDescription = if (hasTranscript) {
+                                "You said: ${uiState.liveTranscription}. Answer: $displayAnswer"
+                            } else {
+                                "Last answer: $displayAnswer"
+                            }
                         },
                     color = AyneDarkCard,
                     shape = RoundedCornerShape(12.dp)
@@ -292,7 +314,7 @@ fun EnglishMockScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "Surroundings",
+                                text = if (hasTranscript) "Question & Answer" else "Surroundings",
                                 color = AyneVibrantYellow,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold
@@ -311,6 +333,33 @@ fun EnglishMockScreen(
                         }
 
                         Spacer(modifier = Modifier.height(6.dp))
+
+                        // What the user said (server-side speech-to-text)
+                        if (hasTranscript) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(AynePureBlack, RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 8.dp, vertical = 6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Mic,
+                                    contentDescription = null,
+                                    tint = AyneVibrantYellow,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "You said: ${uiState.liveTranscription}",
+                                    color = AynePureWhite.copy(alpha = 0.9f),
+                                    fontSize = 13.sp,
+                                    lineHeight = 18.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                        }
 
                         Text(
                             text = displayAnswer,
@@ -413,7 +462,7 @@ fun EnglishMockScreen(
                     )
 
                     val askSubtitle = when {
-                        uiState.isRecordingVoice -> "Recording… Tap to submit"
+                        uiState.isRecordingVoice -> "Listening… Auto-submits when you pause"
                         uiState.activeSessionId != null -> "Ask follow-up or chat"
                         uiState.lockedImageBase64 != null -> "Ask follow-up or chat"
                         else -> "AI Companion · Chat about jokes, fun facts & news"
@@ -540,7 +589,11 @@ fun AfaanOromooMockScreen(
                         .border(2.dp, AyneVibrantYellow, RoundedCornerShape(12.dp))
                         .semantics {
                             role = Role.Button
-                            contentDescription = "Waraabbiin sagalee banaadha. Xumuruuf tuqi."
+                            contentDescription = if (uiState.liveTranscription != null) {
+                                "Kan dhaggeeffame: ${uiState.liveTranscription}. Galchiuf tuqi."
+                            } else {
+                                "Maayikirofoonni dhaggeeffachaa jira. Gaaffii dubbadhu; yeroo dhaabdu ofumaan ni ergama."
+                            }
                         }
                         .testTag("card_recording_voice_active_om"),
                     color = AyneDarkCard,
@@ -554,24 +607,37 @@ fun AfaanOromooMockScreen(
                             modifier = Modifier
                                 .size(36.dp)
                                 .clip(CircleShape)
-                                .background(AyneVibrantYellow),
+                                .background(if (uiState.heardSpeech) AynePureWhite else AyneVibrantYellow),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Filled.Mic,
                                 contentDescription = null,
-                                tint = AyneOnYellow,
+                                tint = if (uiState.heardSpeech) AynePureBlack else AyneOnYellow,
                                 modifier = Modifier.size(22.dp)
                             )
                         }
                         Spacer(modifier = Modifier.width(12.dp))
-                        Text(
-                            text = "Dhaggeeffachaa jira… Gaaffii keessan dubbadhaa.",
-                            color = AyneVibrantYellow,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            lineHeight = 18.sp
-                        )
+                        Column {
+                            Text(
+                                text = if (uiState.heardSpeech) "Si dhaga'een… Yeroo dhaabdu ergaa"
+                                       else "Dhaggeeffachaa jira… Gaaffii keessan dubbadhaa. Yeroo dhaabdu ofumaan ni ergama.",
+                                color = AyneVibrantYellow,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                lineHeight = 18.sp
+                            )
+                            if (!uiState.liveTranscription.isNullOrBlank()) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Atsi jedheete: ${uiState.liveTranscription}",
+                                    color = AynePureWhite,
+                                    fontSize = 14.sp,
+                                    lineHeight = 19.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -670,15 +736,21 @@ fun AfaanOromooMockScreen(
                         }
                     }
                 }
-            } else if (!uiState.lastAnswer.isNullOrBlank() && !uiState.isBusy && !uiState.isCompanionMode) {
-                // 5. Visual Description Result Card
+            } else if (!uiState.lastAnswer.isNullOrBlank() && !uiState.isBusy) {
+                // 5. Visual Description / Q&A Result Card
+                val hasTranscript = !uiState.liveTranscription.isNullOrBlank()
+
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(bottom = 14.dp)
                         .border(1.dp, AyneVibrantYellow.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
                         .semantics {
-                            contentDescription = "Deebii: ${uiState.lastAnswer}"
+                            contentDescription = if (hasTranscript) {
+                                "Atsi jedheete: ${uiState.liveTranscription}. Deebii: ${uiState.lastAnswer}"
+                            } else {
+                                "Deebii: ${uiState.lastAnswer}"
+                            }
                         },
                     color = AyneDarkCard,
                     shape = RoundedCornerShape(12.dp)
@@ -690,7 +762,7 @@ fun AfaanOromooMockScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "Naannoo",
+                                text = if (hasTranscript) "Gaaffii fi Deebii" else "Naannoo",
                                 color = AyneVibrantYellow,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold
@@ -709,6 +781,33 @@ fun AfaanOromooMockScreen(
                         }
 
                         Spacer(modifier = Modifier.height(6.dp))
+
+                        // What the user said (server-side speech-to-text)
+                        if (hasTranscript) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(AynePureBlack, RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 8.dp, vertical = 6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Mic,
+                                    contentDescription = null,
+                                    tint = AyneVibrantYellow,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Atsi jedheete: ${uiState.liveTranscription}",
+                                    color = AynePureWhite.copy(alpha = 0.9f),
+                                    fontSize = 13.sp,
+                                    lineHeight = 18.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                        }
 
                         Text(
                             text = uiState.lastAnswer ?: "",
@@ -811,7 +910,7 @@ fun AfaanOromooMockScreen(
                     )
 
                     val askSubtitle = when {
-                        uiState.isRecordingVoice -> "Waraabaa jira… Xumuruuf tuqi"
+                        uiState.isRecordingVoice -> "Dhaggeeffachaa jira… Yeroo dhaabdu ofumaan ergama"
                         uiState.activeSessionId != null -> "Gaaffii dabalataa gaafadhu"
                         uiState.lockedImageBase64 != null -> "Gaaffii dabalataa gaafadhu"
                         else -> "Hiriyyaa AI · Qoosaa, oduu fi waan barbaadde hunda"
