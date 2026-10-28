@@ -12,6 +12,15 @@ fun String.cleanLabelPrefix(): String {
         .trim()
 }
 
+/**
+ * Android's JSONObject.optString returns the literal string "null" when the value is
+ * JSON null (e.g. the Afaan Oromoo endpoints return "amharic": null). This normalizes
+ * JSON null and blank values to an empty string so fallback chains work correctly.
+ */
+fun JSONObject.optText(name: String): String {
+    return optString(name, "").takeIf { it.isNotBlank() && it != "null" } ?: ""
+}
+
 data class ConversationTurn(
     val role: String,
     val text: String
@@ -82,21 +91,21 @@ data class VisionDescribeResponse(
                 )
             }
 
-            val rawOromo = root.optString("oromo").ifEmpty {
-                root.optString("afaanOromoo", "")
+            val rawOromo = root.optText("oromo").ifEmpty {
+                root.optText("afaanOromoo")
             }
-            val rawAmharic = root.optString("amharic").ifEmpty {
-                root.optString("cleanSpeech").ifEmpty {
-                    root.optString("text").ifEmpty {
-                        root.optString("description", "")
+            val rawAmharic = root.optText("amharic").ifEmpty {
+                root.optText("cleanSpeech").ifEmpty {
+                    root.optText("text").ifEmpty {
+                        root.optText("description")
                     }
                 }
             }
             val cleanAmharic = rawAmharic.cleanLabelPrefix()
-            val cleanSpeech = root.optString("cleanSpeech").takeIf { it.isNotEmpty() }?.cleanLabelPrefix()
-            val rawEnglish = root.optString("english").ifEmpty {
-                root.optString("englishTranslation").ifEmpty {
-                    root.optString("translation", "")
+            val cleanSpeech = root.optText("cleanSpeech").takeIf { it.isNotEmpty() }?.cleanLabelPrefix()
+            val rawEnglish = root.optText("english").ifEmpty {
+                root.optText("englishTranslation").ifEmpty {
+                    root.optText("translation")
                 }
             }
             val sessionId = root.optString("sessionId").ifEmpty { root.optString("chatId") }.takeIf { it.isNotBlank() && it != "null" }
@@ -105,7 +114,7 @@ data class VisionDescribeResponse(
             return VisionDescribeResponse(
                 success = root.optBoolean("success", true),
                 sessionId = sessionId,
-                transcribedQuery = root.optString("transcribedQuery").takeIf { it.isNotEmpty() },
+                transcribedQuery = root.optText("transcribedQuery").takeIf { it.isNotEmpty() },
                 amharic = cleanAmharic,
                 english = rawEnglish,
                 cleanSpeech = cleanSpeech,
@@ -163,13 +172,13 @@ data class ReadTextResponse(
                 )
             }
 
-            val spokenAmharic = root.optString("spokenAmharic").takeIf { it.isNotEmpty() && it != "null" }?.cleanLabelPrefix()
-            val rawAmharic = spokenAmharic ?: root.optString("amharic", "")
+            val spokenAmharic = root.optText("spokenAmharic").takeIf { it.isNotEmpty() }?.cleanLabelPrefix()
+            val rawAmharic = spokenAmharic ?: root.optText("amharic")
             val resolvedAmharic = rawAmharic.cleanLabelPrefix()
-            val cleanSpeech = root.optString("cleanSpeech").takeIf { it.isNotEmpty() && it != "null" }?.cleanLabelPrefix()
+            val cleanSpeech = root.optText("cleanSpeech").takeIf { it.isNotEmpty() }?.cleanLabelPrefix()
             val sessionId = root.optString("sessionId").takeIf { it.isNotBlank() && it != "null" }
-            val rawOromo = root.optString("oromo").ifEmpty {
-                root.optString("afaanOromoo", "")
+            val rawOromo = root.optText("oromo").ifEmpty {
+                root.optText("afaanOromoo")
             }
 
             return ReadTextResponse(
@@ -181,7 +190,7 @@ data class ReadTextResponse(
                 locationContext = root.optString("locationContext").takeIf { it.isNotEmpty() && it != "null" },
                 extractedText = root.optString("extractedText").takeIf { it.isNotEmpty() && it != "null" },
                 amharic = resolvedAmharic,
-                english = root.optString("english", ""),
+                english = root.optText("english"),
                 oromo = rawOromo.cleanLabelPrefix(),
                 cleanSpeech = cleanSpeech,
                 isLegible = root.optBoolean("isLegible", true),
@@ -260,10 +269,10 @@ data class ReadTextOcrEvent(
     companion object {
         fun fromJson(jsonStr: String): ReadTextOcrEvent {
             val root = JSONObject(jsonStr)
-            val spokenAmharic = root.optString("spokenAmharic").takeIf { it.isNotEmpty() && it != "null" }?.cleanLabelPrefix()
-            val rawAmharic = root.optString("amharic", "")
+            val spokenAmharic = root.optText("spokenAmharic").takeIf { it.isNotEmpty() }?.cleanLabelPrefix()
+            val rawAmharic = root.optText("amharic")
             val cleanAmharic = rawAmharic.cleanLabelPrefix()
-            val cleanSpeech = root.optString("cleanSpeech").takeIf { it.isNotEmpty() && it != "null" }?.cleanLabelPrefix()
+            val cleanSpeech = root.optText("cleanSpeech").takeIf { it.isNotEmpty() }?.cleanLabelPrefix()
             val sessionId = root.optString("sessionId").takeIf { it.isNotBlank() && it != "null" }
 
             return ReadTextOcrEvent(
@@ -274,9 +283,9 @@ data class ReadTextOcrEvent(
                 extractedText = root.optString("extractedText").takeIf { it.isNotEmpty() && it != "null" },
                 spokenAmharic = spokenAmharic,
                 amharic = cleanAmharic,
-                english = root.optString("english", ""),
-                oromo = root.optString("oromo").ifEmpty {
-                    root.optString("afaanOromoo", "")
+                english = root.optText("english"),
+                oromo = root.optText("oromo").ifEmpty {
+                    root.optText("afaanOromoo")
                 }.cleanLabelPrefix(),
                 cleanSpeech = cleanSpeech,
                 isCutOff = root.optBoolean("isCutOff", false),
@@ -301,7 +310,7 @@ data class AskQuestionTranscriptionEvent(
         fun fromJson(jsonStr: String): AskQuestionTranscriptionEvent {
             val root = JSONObject(jsonStr)
             return AskQuestionTranscriptionEvent(
-                transcribedQuery = root.optString("transcribedQuery", ""),
+                transcribedQuery = root.optText("transcribedQuery"),
                 detectedLanguage = root.optString("detectedLanguage").takeIf { it.isNotEmpty() },
                 sttLatencyMs = if (root.has("sttLatencyMs")) root.optLong("sttLatencyMs") else null
             )
@@ -320,16 +329,16 @@ data class AskQuestionAnswerEvent(
     companion object {
         fun fromJson(jsonStr: String): AskQuestionAnswerEvent {
             val root = JSONObject(jsonStr)
-            val rawAmharic = root.optString("amharic").ifEmpty {
-                root.optString("cleanSpeech").ifEmpty { root.optString("text", "") }
+            val rawAmharic = root.optText("amharic").ifEmpty {
+                root.optText("cleanSpeech").ifEmpty { root.optText("text") }
             }
-            val rawOromo = root.optString("oromo").ifEmpty {
-                root.optString("afaanOromoo", "")
+            val rawOromo = root.optText("oromo").ifEmpty {
+                root.optText("afaanOromoo")
             }
             return AskQuestionAnswerEvent(
                 sessionId = root.optString("sessionId").takeIf { it.isNotBlank() && it != "null" },
                 amharic = rawAmharic.cleanLabelPrefix(),
-                english = root.optString("english", ""),
+                english = root.optText("english"),
                 oromo = rawOromo.cleanLabelPrefix(),
                 language = root.optString("language").takeIf { it.isNotEmpty() },
                 visionLatencyMs = if (root.has("visionLatencyMs")) root.optLong("visionLatencyMs") else null

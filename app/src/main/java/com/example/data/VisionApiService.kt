@@ -220,10 +220,10 @@ class VisionApiService(
                             "vision" -> {
                                 try {
                                     val obj = JSONObject(dataStr)
-                                    val rawAmharic = obj.optString("amharic", "")
+                                    val rawAmharic = obj.optText("amharic")
                                     val amharic = rawAmharic.cleanLabelPrefix()
-                                    val rawOromo = obj.optString("oromo").ifEmpty { obj.optString("afaanOromoo", "") }
-                                    val english = obj.optString("english", "")
+                                    val rawOromo = obj.optText("oromo").ifEmpty { obj.optText("afaanOromoo") }
+                                    val english = obj.optText("english")
                                     val latency = if (obj.has("visionLatencyMs")) obj.optLong("visionLatencyMs") else null
                                     val sid = obj.optString("sessionId").takeIf { it.isNotBlank() && it != "null" }
                                     onVision(StreamVisionEvent(amharic = amharic, english = english, oromo = rawOromo, visionLatencyMs = latency, sessionId = sid))
@@ -252,10 +252,10 @@ class VisionApiService(
                                 try {
                                     val obj = JSONObject(dataStr)
                                     if (obj.has("amharic") || obj.has("oromo") || obj.has("english")) {
-                                        val rawAmharic = obj.optString("amharic", "")
+                                        val rawAmharic = obj.optText("amharic")
                                         val amharic = rawAmharic.cleanLabelPrefix()
-                                        val rawOromo = obj.optString("oromo").ifEmpty { obj.optString("afaanOromoo", "") }
-                                        val english = obj.optString("english", "")
+                                        val rawOromo = obj.optText("oromo").ifEmpty { obj.optText("afaanOromoo") }
+                                        val english = obj.optText("english")
                                         val latency = if (obj.has("visionLatencyMs")) obj.optLong("visionLatencyMs") else null
                                         val sid = obj.optString("sessionId").takeIf { it.isNotBlank() && it != "null" }
                                         onVision(StreamVisionEvent(amharic = amharic, english = english, oromo = rawOromo, visionLatencyMs = latency, sessionId = sid))
