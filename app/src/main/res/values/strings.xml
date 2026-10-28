@@ -66,7 +66,10 @@
     <string name="cancel_button">Cancel</string>
     <string name="reset_default">Reset Default</string>
     <string name="session_expired_prompt">የተያዘው ምስል ጊዜው አልፏል፤ እባክዎ አዲስ ፎቶ ያንሱ</string>
+    <string name="session_expired_prompt_om">Yeroon suuraa darbeera. Maaloo suuraa haaraa kaasaa.</string>
     <string name="inadmissible_audio_prompt">ድምፅዎ አልተሰማም፤ እባክዎ እንደገና ይናገሩ</string>
+    <string name="inadmissible_audio_prompt_om">Sagaleen keessan hin dhaga\'amne; maaloo lammata dubbadhaa.</string>
+    <string name="not_visible_prompt_om">Fakkii kana keessatti wantichi hin mul\'atu.</string>
     
     <!-- Languages -->
     <string name="language_amharic">አማርኛ</string>

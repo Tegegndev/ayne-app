@@ -518,7 +518,16 @@ class AyneViewModel(
                 repeatLastAnswer(context)
             }
             is AyneAction.SelectLanguage -> {
-                _uiState.update { it.copy(selectedLanguage = action.language) }
+                val newVoice = when (action.language) {
+                    SupportedLanguage.AFAN_OROMOO -> {
+                        if (!_uiState.value.customVoice.startsWith("om-")) "om-ayyaantuu" else _uiState.value.customVoice
+                    }
+                    SupportedLanguage.AMHARIC -> {
+                        if (_uiState.value.customVoice.startsWith("om-")) "am-hamen" else _uiState.value.customVoice
+                    }
+                    SupportedLanguage.ENGLISH -> _uiState.value.customVoice
+                }
+                _uiState.update { it.copy(selectedLanguage = action.language, customVoice = newVoice) }
                 _userMessage.tryEmit("Language: ${action.language.displayName}")
             }
             is AyneAction.FlipCamera -> {
@@ -602,8 +611,18 @@ class AyneViewModel(
 
         viewModelScope.launch {
             val endpoint = state.apiEndpoint
-            val voice = state.customVoice
-            val prefLang = if (state.selectedLanguage == SupportedLanguage.ENGLISH) "en" else "am"
+            val prefLang = when (state.selectedLanguage) {
+                SupportedLanguage.ENGLISH -> "en"
+                SupportedLanguage.AFAN_OROMOO -> "om"
+                SupportedLanguage.AMHARIC -> "am"
+            }
+            val voice = if (state.selectedLanguage == SupportedLanguage.AFAN_OROMOO && !state.customVoice.startsWith("om-")) {
+                "om-ayyaantuu"
+            } else if (state.selectedLanguage == SupportedLanguage.AMHARIC && state.customVoice.startsWith("om-")) {
+                "am-hamen"
+            } else {
+                state.customVoice
+            }
             var receivedVision = false
             val audioChunks = StringBuilder()
 
@@ -626,10 +645,10 @@ class AyneViewModel(
                     if (!visionEvent.sessionId.isNullOrBlank()) {
                         activeSessionId = visionEvent.sessionId
                     }
-                    val chosenAnswer = if (state.selectedLanguage == SupportedLanguage.ENGLISH && visionEvent.english.isNotBlank()) {
-                        visionEvent.english
-                    } else {
-                        visionEvent.amharic.ifBlank { visionEvent.english }
+                    val chosenAnswer = when (state.selectedLanguage) {
+                        SupportedLanguage.ENGLISH -> visionEvent.english.ifBlank { visionEvent.amharic }
+                        SupportedLanguage.AFAN_OROMOO -> visionEvent.oromo.ifBlank { visionEvent.amharic.ifBlank { visionEvent.english } }
+                        SupportedLanguage.AMHARIC -> visionEvent.amharic.ifBlank { visionEvent.english }
                     }.cleanLabelPrefix()
 
                     val initialHistory = listOf(
@@ -697,10 +716,10 @@ class AyneViewModel(
                     if (!response.sessionId.isNullOrBlank()) {
                         activeSessionId = response.sessionId
                     }
-                    val chosenAnswer = if (state.selectedLanguage == SupportedLanguage.ENGLISH && response.english.isNotBlank()) {
-                        response.english
-                    } else {
-                        response.amharic.ifBlank { response.english }
+                    val chosenAnswer = when (state.selectedLanguage) {
+                        SupportedLanguage.ENGLISH -> response.english.ifBlank { response.amharic }
+                        SupportedLanguage.AFAN_OROMOO -> response.oromo.ifBlank { response.cleanSpeech ?: response.english }
+                        SupportedLanguage.AMHARIC -> response.amharic.ifBlank { response.english }
                     }.cleanLabelPrefix()
 
                     val initialHistory = listOf(
@@ -797,15 +816,25 @@ class AyneViewModel(
         viewModelScope.launch {
             val askEndpoint = state.askQuestionEndpoint
             val visionEndpoint = state.apiEndpoint
-            val voice = state.customVoice
-            val prefLang = if (state.selectedLanguage == SupportedLanguage.ENGLISH) "en" else "am"
+            val prefLang = when (state.selectedLanguage) {
+                SupportedLanguage.ENGLISH -> "en"
+                SupportedLanguage.AFAN_OROMOO -> "om"
+                SupportedLanguage.AMHARIC -> "am"
+            }
+            val voice = if (state.selectedLanguage == SupportedLanguage.AFAN_OROMOO && !state.customVoice.startsWith("om-")) {
+                "om-ayyaantuu"
+            } else if (state.selectedLanguage == SupportedLanguage.AMHARIC && state.customVoice.startsWith("om-")) {
+                "am-hamen"
+            } else {
+                state.customVoice
+            }
             val sendSessionId = sid
 
             var receivedAnswer = false
             var currentTranscribedQuery: String? = textQuery
             val audioChunks = StringBuilder()
 
-            // 1. Primary: Dedicated Real-Time SSE Stream (POST /api/ask-question/stream)
+            // 1. Primary: Dedicated Real-Time SSE Stream (POST /api/ask-question/stream or /api/ask-question/om/stream)
             val streamResult = visionApiService.askQuestionStream(
                 baseEndpointUrl = askEndpoint,
                 sessionId = sendSessionId,
@@ -820,7 +849,11 @@ class AyneViewModel(
                     val queryText = transEv.transcribedQuery.ifBlank { textQuery ?: "" }
                     currentTranscribedQuery = queryText
                     if (queryText.isNotBlank()) {
-                        val transMsg = if (prefLang == "en") "Question: \"$queryText\"" else "ጥያቄ፡ \"$queryText\""
+                        val transMsg = when (prefLang) {
+                            "en" -> "Question: \"$queryText\""
+                            "om" -> "Gaaffii: \"$queryText\""
+                            else -> "ጥያቄ፡ \"$queryText\""
+                        }
                         _uiState.update { it.copy(busyMessage = transMsg) }
                         _userMessage.tryEmit(transMsg)
                     }
@@ -832,10 +865,10 @@ class AyneViewModel(
                     if (!ansEv.sessionId.isNullOrBlank()) {
                         activeSessionId = ansEv.sessionId
                     }
-                    val chosenAnswer = if (state.selectedLanguage == SupportedLanguage.ENGLISH && ansEv.english.isNotBlank()) {
-                        ansEv.english
-                    } else {
-                        ansEv.amharic.ifBlank { ansEv.english }
+                    val chosenAnswer = when (state.selectedLanguage) {
+                        SupportedLanguage.ENGLISH -> ansEv.english.ifBlank { ansEv.amharic }
+                        SupportedLanguage.AFAN_OROMOO -> ansEv.oromo.ifBlank { ansEv.english.ifBlank { ansEv.amharic } }
+                        SupportedLanguage.AMHARIC -> ansEv.amharic.ifBlank { ansEv.english }
                     }.cleanLabelPrefix()
 
                     val userTurn = currentTranscribedQuery?.takeIf { it.isNotBlank() } ?: "Voice question"
@@ -880,7 +913,11 @@ class AyneViewModel(
                                 busyMessage = null
                             )
                         }
-                        val prompt = context.getString(R.string.session_expired_prompt)
+                        val prompt = if (state.selectedLanguage == SupportedLanguage.AFAN_OROMOO) {
+                            context.getString(R.string.session_expired_prompt_om)
+                        } else {
+                            context.getString(R.string.session_expired_prompt)
+                        }
                         _userMessage.tryEmit(prompt)
                     } else if (code == "INADMISSIBLE_AUDIO") {
                         _uiState.update {
@@ -889,7 +926,9 @@ class AyneViewModel(
                                 busyMessage = null
                             )
                         }
-                        val prompt = if (message.isNotBlank() && message != "INADMISSIBLE_AUDIO") {
+                        val prompt = if (state.selectedLanguage == SupportedLanguage.AFAN_OROMOO) {
+                            context.getString(R.string.inadmissible_audio_prompt_om)
+                        } else if (message.isNotBlank() && message != "INADMISSIBLE_AUDIO") {
                             message
                         } else {
                             context.getString(R.string.inadmissible_audio_prompt)
@@ -920,7 +959,7 @@ class AyneViewModel(
                 }
             )
 
-            // 2. Fallback to buffered JSON (POST /api/ask-question) if streaming failed before answer
+            // 2. Fallback to buffered JSON (POST /api/ask-question or /api/ask-question/om) if streaming failed before answer
             if (streamResult.isFailure && !receivedAnswer) {
                 val bufferedResult = visionApiService.askQuestion(
                     endpointUrl = askEndpoint,
@@ -940,10 +979,10 @@ class AyneViewModel(
                     if (!response.sessionId.isNullOrBlank()) {
                         activeSessionId = response.sessionId
                     }
-                    val chosenAnswer = if (state.selectedLanguage == SupportedLanguage.ENGLISH && response.english.isNotBlank()) {
-                        response.english
-                    } else {
-                        response.amharic.ifBlank { response.english }
+                    val chosenAnswer = when (state.selectedLanguage) {
+                        SupportedLanguage.ENGLISH -> response.english.ifBlank { response.amharic }
+                        SupportedLanguage.AFAN_OROMOO -> response.oromo.ifBlank { response.cleanSpeech ?: response.english }
+                        SupportedLanguage.AMHARIC -> response.amharic.ifBlank { response.english }
                     }.cleanLabelPrefix()
 
                     val userTurn = response.transcribedQuery?.takeIf { it.isNotBlank() } ?: currentTranscribedQuery ?: "Voice question"
@@ -1283,6 +1322,9 @@ class MainActivity : ComponentActivity() {
     private var volumeDownPressTime = 0L
     private var isVolumeUpLongPress = false
     private var isVolumeDownLongPress = false
+    private var lastVolumeDownReleaseTime = 0L
+    private val volumeDownHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var pendingVolumeDownRunnable: Runnable? = null
 
     fun registerVolumeHandlers(onCapture: () -> Unit, onFollowUp: () -> Unit) {
         onVolumeCaptureTriggered = onCapture
@@ -1300,6 +1342,11 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        pendingVolumeDownRunnable?.let { volumeDownHandler.removeCallbacks(it) }
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
@@ -1371,9 +1418,25 @@ class MainActivity : ComponentActivity() {
             }
             KeyEvent.KEYCODE_VOLUME_DOWN -> {
                 if (!isVolumeDownLongPress && (System.currentTimeMillis() - volumeDownPressTime < 600)) {
-                    onVolumeFollowUpTriggered?.invoke()
-                        ?: viewModel.onAction(this, AyneAction.VolumeFollowUpTriggered)
-                    return true
+                    val now = System.currentTimeMillis()
+                    if (now - lastVolumeDownReleaseTime < 350) {
+                        // Double-tap on Volume-: Instant memory replay of last spoken audio buffer with 0 network calls!
+                        pendingVolumeDownRunnable?.let { volumeDownHandler.removeCallbacks(it) }
+                        pendingVolumeDownRunnable = null
+                        lastVolumeDownReleaseTime = 0L
+                        viewModel.onAction(this@MainActivity, AyneAction.RepeatLastAnswer)
+                        return true
+                    } else {
+                        lastVolumeDownReleaseTime = now
+                        val runnable = Runnable {
+                            onVolumeFollowUpTriggered?.invoke()
+                                ?: viewModel.onAction(this@MainActivity, AyneAction.VolumeFollowUpTriggered)
+                            pendingVolumeDownRunnable = null
+                        }
+                        pendingVolumeDownRunnable = runnable
+                        volumeDownHandler.postDelayed(runnable, 350)
+                        return true
+                    }
                 }
                 return super.onKeyUp(keyCode, event)
             }
@@ -3102,6 +3165,10 @@ fun VisionSettingsDialog(
         "am-simon" to "am-simon (Addis Native Amharic, Male)",
         "am-yohanes-calm" to "am-yohanes-calm (Addis Calm Narrative)",
         "am-tesfa" to "am-tesfa (Addis Energetic Daily)",
+        "om-ayyaantuu" to "om-ayyaantuu (Addis Native Oromo, Female)",
+        "om-bikila" to "om-bikila (Addis Native Oromo, Male)",
+        "om-leensaa" to "om-leensaa (Addis Native Oromo, Narrative)",
+        "om-diriba" to "om-diriba (Addis Native Oromo, Clear)",
         "Zephyr" to "Zephyr (Gemini Neural, Fast Clear)",
         "Aoede" to "Aoede (Gemini Neural, Warm Reading)",
         "Puck" to "Puck (Gemini Neural, Upbeat)",

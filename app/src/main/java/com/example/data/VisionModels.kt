@@ -39,21 +39,39 @@ data class VisionDescribeResponse(
     val english: String,
     val cleanSpeech: String?,
     val audio: VisionAudioData?,
-    val metrics: VisionMetrics?
+    val metrics: VisionMetrics?,
+    val oromo: String = "",
+    val sceneType: String? = null
 ) {
     companion object {
         fun fromJson(jsonStr: String): VisionDescribeResponse {
             val root = JSONObject(jsonStr)
             val audioObj = root.optJSONObject("audio")
-            val audioData = audioObj?.let {
+            val rootAudioUrl = root.optString("audioUrl").takeIf { it.isNotEmpty() && it != "null" }
+            val rootAudioBase64 = root.optString("audioBase64").takeIf { it.isNotEmpty() && it != "null" }
+
+            val audioData = if (audioObj != null) {
                 VisionAudioData(
-                    audioBase64 = it.optString("audioBase64").takeIf { s -> s.isNotEmpty() },
-                    audioUrl = it.optString("audioUrl").takeIf { s -> s.isNotEmpty() },
-                    durationSeconds = if (it.has("durationSeconds")) it.optDouble("durationSeconds") else null,
-                    provider = it.optString("provider").takeIf { s -> s.isNotEmpty() },
-                    voiceId = it.optString("voiceId").takeIf { s -> s.isNotEmpty() }
+                    audioBase64 = audioObj.optString("audioBase64").takeIf { s -> s.isNotEmpty() },
+                    audioUrl = audioObj.optString("audioUrl").takeIf { s -> s.isNotEmpty() },
+                    durationSeconds = if (audioObj.has("durationSeconds")) audioObj.optDouble("durationSeconds") else null,
+                    provider = audioObj.optString("provider").takeIf { s -> s.isNotEmpty() },
+                    voiceId = audioObj.optString("voiceId").takeIf { s -> s.isNotEmpty() }
                 )
-            }
+            } else if (rootAudioUrl != null || rootAudioBase64 != null) {
+                val b64 = rootAudioBase64 ?: if (rootAudioUrl!!.startsWith("data:audio") && rootAudioUrl.contains(",")) {
+                    rootAudioUrl.substringAfter(",")
+                } else {
+                    rootAudioUrl
+                }
+                VisionAudioData(
+                    audioBase64 = b64,
+                    audioUrl = rootAudioUrl,
+                    durationSeconds = null,
+                    provider = root.optString("ttsProvider").ifEmpty { "addis" },
+                    voiceId = root.optString("customVoice").ifEmpty { "om-ayyaantuu" }
+                )
+            } else null
 
             val metricsObj = root.optJSONObject("metrics")
             val metrics = metricsObj?.let {
@@ -64,6 +82,9 @@ data class VisionDescribeResponse(
                 )
             }
 
+            val rawOromo = root.optString("oromo").ifEmpty {
+                root.optString("afaanOromoo", "")
+            }
             val rawAmharic = root.optString("amharic").ifEmpty {
                 root.optString("cleanSpeech").ifEmpty {
                     root.optString("text").ifEmpty {
@@ -79,6 +100,7 @@ data class VisionDescribeResponse(
                 }
             }
             val sessionId = root.optString("sessionId").ifEmpty { root.optString("chatId") }.takeIf { it.isNotBlank() && it != "null" }
+            val sceneType = root.optString("sceneType").takeIf { it.isNotBlank() && it != "null" }
 
             return VisionDescribeResponse(
                 success = root.optBoolean("success", true),
@@ -88,7 +110,9 @@ data class VisionDescribeResponse(
                 english = rawEnglish,
                 cleanSpeech = cleanSpeech,
                 audio = audioData,
-                metrics = metrics
+                metrics = metrics,
+                oromo = rawOromo,
+                sceneType = sceneType
             )
         }
     }
@@ -172,6 +196,7 @@ data class ReadTextResponse(
 data class StreamVisionEvent(
     val amharic: String,
     val english: String,
+    val oromo: String = "",
     val visionLatencyMs: Long?,
     val sessionId: String? = null
 )
@@ -278,6 +303,8 @@ data class AskQuestionAnswerEvent(
     val sessionId: String?,
     val amharic: String,
     val english: String,
+    val oromo: String = "",
+    val language: String? = null,
     val visionLatencyMs: Long?
 ) {
     companion object {
@@ -286,10 +313,15 @@ data class AskQuestionAnswerEvent(
             val rawAmharic = root.optString("amharic").ifEmpty {
                 root.optString("cleanSpeech").ifEmpty { root.optString("text", "") }
             }
+            val rawOromo = root.optString("oromo").ifEmpty {
+                root.optString("afaanOromoo", "")
+            }
             return AskQuestionAnswerEvent(
                 sessionId = root.optString("sessionId").takeIf { it.isNotBlank() && it != "null" },
                 amharic = rawAmharic.cleanLabelPrefix(),
                 english = root.optString("english", ""),
+                oromo = rawOromo.cleanLabelPrefix(),
+                language = root.optString("language").takeIf { it.isNotEmpty() },
                 visionLatencyMs = if (root.has("visionLatencyMs")) root.optLong("visionLatencyMs") else null
             )
         }

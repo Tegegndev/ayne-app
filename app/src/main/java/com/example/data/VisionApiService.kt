@@ -222,10 +222,11 @@ class VisionApiService(
                                     val obj = JSONObject(dataStr)
                                     val rawAmharic = obj.optString("amharic", "")
                                     val amharic = rawAmharic.cleanLabelPrefix()
+                                    val rawOromo = obj.optString("oromo").ifEmpty { obj.optString("afaanOromoo", "") }
                                     val english = obj.optString("english", "")
                                     val latency = if (obj.has("visionLatencyMs")) obj.optLong("visionLatencyMs") else null
                                     val sid = obj.optString("sessionId").takeIf { it.isNotBlank() && it != "null" }
-                                    onVision(StreamVisionEvent(amharic, english, latency, sid))
+                                    onVision(StreamVisionEvent(amharic = amharic, english = english, oromo = rawOromo, visionLatencyMs = latency, sessionId = sid))
                                 } catch (e: Exception) {
                                     // Ignore parse error on malformed chunk
                                 }
@@ -250,13 +251,14 @@ class VisionApiService(
                                 // Fallback: some servers send vision directly without named event
                                 try {
                                     val obj = JSONObject(dataStr)
-                                    if (obj.has("amharic")) {
+                                    if (obj.has("amharic") || obj.has("oromo") || obj.has("english")) {
                                         val rawAmharic = obj.optString("amharic", "")
                                         val amharic = rawAmharic.cleanLabelPrefix()
+                                        val rawOromo = obj.optString("oromo").ifEmpty { obj.optString("afaanOromoo", "") }
                                         val english = obj.optString("english", "")
                                         val latency = if (obj.has("visionLatencyMs")) obj.optLong("visionLatencyMs") else null
                                         val sid = obj.optString("sessionId").takeIf { it.isNotBlank() && it != "null" }
-                                        onVision(StreamVisionEvent(amharic, english, latency, sid))
+                                        onVision(StreamVisionEvent(amharic = amharic, english = english, oromo = rawOromo, visionLatencyMs = latency, sessionId = sid))
                                     }
                                 } catch (e: Exception) {
                                     // Ignore
@@ -495,14 +497,28 @@ class VisionApiService(
         onDone: () -> Unit
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            val streamUrl = if (baseEndpointUrl.endsWith("/stream")) {
-                baseEndpointUrl
-            } else if (baseEndpointUrl.endsWith("/ask-question")) {
-                "$baseEndpointUrl/stream"
-            } else if (baseEndpointUrl.endsWith("/see-and-describe")) {
-                baseEndpointUrl.replace("see-and-describe", "ask-question") + "/stream"
+            val streamUrl = if (preferredLanguage == "om") {
+                if (baseEndpointUrl.endsWith("/stream")) {
+                    baseEndpointUrl
+                } else if (baseEndpointUrl.endsWith("/ask-question/om")) {
+                    "$baseEndpointUrl/stream"
+                } else if (baseEndpointUrl.endsWith("/ask-question")) {
+                    "$baseEndpointUrl/om/stream"
+                } else if (baseEndpointUrl.endsWith("/see-and-describe")) {
+                    baseEndpointUrl.replace("see-and-describe", "ask-question/om") + "/stream"
+                } else {
+                    "${baseEndpointUrl.trimEnd('/')}/api/ask-question/om/stream"
+                }
             } else {
-                "${baseEndpointUrl.trimEnd('/')}/api/ask-question/stream"
+                if (baseEndpointUrl.endsWith("/stream")) {
+                    baseEndpointUrl
+                } else if (baseEndpointUrl.endsWith("/ask-question")) {
+                    "$baseEndpointUrl/stream"
+                } else if (baseEndpointUrl.endsWith("/see-and-describe")) {
+                    baseEndpointUrl.replace("see-and-describe", "ask-question") + "/stream"
+                } else {
+                    "${baseEndpointUrl.trimEnd('/')}/api/ask-question/stream"
+                }
             }
 
             val jsonPayload = JSONObject().apply {
@@ -544,9 +560,19 @@ class VisionApiService(
                     onErrorEvent(code, msg)
                 } catch (e: Exception) {
                     if (response.code == 404) {
-                        onErrorEvent("SESSION_EXPIRED", "Session expired in server cache.")
+                        val msg = if (preferredLanguage == "om") {
+                            "Yeroon suuraa darbeera. Maaloo suuraa haaraa kaasaa."
+                        } else {
+                            "Session expired in server cache."
+                        }
+                        onErrorEvent("SESSION_EXPIRED", msg)
                     } else if (response.code == 422) {
-                        onErrorEvent("INADMISSIBLE_AUDIO", "ድምፅዎ አልተሰማም፤ እባክዎ እንደገና ይናገሩ")
+                        val msg = if (preferredLanguage == "om") {
+                            "Sagaleen keessan hin dhaga'amne; maaloo lammata dubbadhaa."
+                        } else {
+                            "ድምፅዎ አልተሰማም፤ እባክዎ እንደገና ይናገሩ"
+                        }
+                        onErrorEvent("INADMISSIBLE_AUDIO", msg)
                     } else {
                         onErrorEvent("HTTP_${response.code}", errBody.ifEmpty { "HTTP ${response.code}" })
                     }
@@ -662,14 +688,28 @@ class VisionApiService(
         includeAudio: Boolean = true
     ): Result<VisionDescribeResponse> = withContext(Dispatchers.IO) {
         try {
-            val resolvedUrl = if (endpointUrl.endsWith("/stream")) {
-                endpointUrl.removeSuffix("/stream")
-            } else if (endpointUrl.endsWith("/ask-question")) {
-                endpointUrl
-            } else if (endpointUrl.endsWith("/see-and-describe")) {
-                endpointUrl.replace("see-and-describe", "ask-question")
+            val resolvedUrl = if (preferredLanguage == "om") {
+                if (endpointUrl.endsWith("/stream")) {
+                    endpointUrl.removeSuffix("/stream")
+                } else if (endpointUrl.endsWith("/ask-question/om")) {
+                    endpointUrl
+                } else if (endpointUrl.endsWith("/ask-question")) {
+                    "$endpointUrl/om"
+                } else if (endpointUrl.endsWith("/see-and-describe")) {
+                    endpointUrl.replace("see-and-describe", "ask-question/om")
+                } else {
+                    "${endpointUrl.trimEnd('/')}/api/ask-question/om"
+                }
             } else {
-                "${endpointUrl.trimEnd('/')}/api/ask-question"
+                if (endpointUrl.endsWith("/stream")) {
+                    endpointUrl.removeSuffix("/stream")
+                } else if (endpointUrl.endsWith("/ask-question")) {
+                    endpointUrl
+                } else if (endpointUrl.endsWith("/see-and-describe")) {
+                    endpointUrl.replace("see-and-describe", "ask-question")
+                } else {
+                    "${endpointUrl.trimEnd('/')}/api/ask-question"
+                }
             }
 
             val jsonPayload = JSONObject().apply {

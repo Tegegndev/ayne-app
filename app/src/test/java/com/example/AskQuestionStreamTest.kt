@@ -86,4 +86,45 @@ class AskQuestionStreamTest {
         assertEquals("https://my-custom-vision.app/api/read-text", AyneUiState.buildReadTextUrl(customBase))
         assertEquals("https://my-custom-vision.app/api/ask-question", AyneUiState.buildAskQuestionUrl(customBase))
     }
+
+    @Test
+    fun testAskQuestionAnswerEventParsingAfaanOromoo() {
+        val json = """
+            {
+                "sessionId": "sess_89f1a23b_45c1",
+                "oromo": "Kubbaan keelloon minjaala irra jira.",
+                "english": "A yellow ball is on the table.",
+                "language": "om",
+                "visionLatencyMs": 680
+            }
+        """.trimIndent()
+
+        val event = AskQuestionAnswerEvent.fromJson(json)
+        assertEquals("sess_89f1a23b_45c1", event.sessionId)
+        assertEquals("Kubbaan keelloon minjaala irra jira.", event.oromo)
+        assertEquals("A yellow ball is on the table.", event.english)
+        assertEquals("om", event.language)
+        assertEquals(680L, event.visionLatencyMs)
+    }
+
+    @Test
+    fun testVisionDescribeResponseParsingAfaanOromoo() {
+        val json = """
+            {
+                "sessionId": "sess_89f1a23b_45c1",
+                "oromo": "Fuuldura kee sa'aatii 12 irratti balballi banamaa jira. Gara mirgaa minjaalli jira.",
+                "english": "At 12 o'clock in front of you, an open door is present. To your right is a table.",
+                "cleanSpeech": "Fuuldura kee sa'aatii 12 irratti balballi banamaa jira. Gara mirgaa minjaalli jira.",
+                "audioUrl": "data:audio/mp3;base64,//uQxAAAAAA",
+                "sceneType": "indoor"
+            }
+        """.trimIndent()
+
+        val response = com.example.data.VisionDescribeResponse.fromJson(json)
+        assertEquals("sess_89f1a23b_45c1", response.sessionId)
+        assertEquals("Fuuldura kee sa'aatii 12 irratti balballi banamaa jira. Gara mirgaa minjaalli jira.", response.oromo)
+        assertEquals("indoor", response.sceneType)
+        assertNotNull(response.audio)
+        assertEquals("//uQxAAAAAA", response.audio?.audioBase64)
+    }
 }

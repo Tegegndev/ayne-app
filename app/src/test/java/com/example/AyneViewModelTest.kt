@@ -107,5 +107,22 @@ class AyneViewModelTest {
 
         val newsEn = generateCompanionFallbackAnswer("Latest news", SupportedLanguage.ENGLISH)
         org.junit.Assert.assertTrue(newsEn.contains("AI") || newsEn.contains("Update"))
+
+        val jokeOm = generateCompanionFallbackAnswer("qoosaa natti himi", SupportedLanguage.AFAN_OROMOO)
+        org.junit.Assert.assertTrue(jokeOm.contains("Namichi") || jokeOm.contains("falaasaa"))
+    }
+
+    @Test
+    fun testSelectAfaanOromooLanguageDefaultsToAyyaantuuVoice() {
+        val viewModel = AyneViewModel()
+        val context = org.robolectric.RuntimeEnvironment.getApplication()
+        assertEquals(SupportedLanguage.AMHARIC, viewModel.uiState.value.selectedLanguage)
+        assertEquals("am-hamen", viewModel.uiState.value.customVoice)
+
+        viewModel.onAction(context, AyneAction.SelectLanguage(SupportedLanguage.AFAN_OROMOO))
+
+        val state = viewModel.uiState.value
+        assertEquals(SupportedLanguage.AFAN_OROMOO, state.selectedLanguage)
+        assertEquals("om-ayyaantuu", state.customVoice)
     }
 }
