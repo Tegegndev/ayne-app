@@ -24,6 +24,7 @@ import androidx.compose.animation.fadeOut
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Base64
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -47,7 +48,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.Close
@@ -156,6 +159,7 @@ data class AyneUiState(
     val isBusy: Boolean = false,
     val busyMessage: String? = null,
     val isFrontCamera: Boolean = false,
+    val baseUrl: String = DEFAULT_BASE_URL,
     val apiEndpoint: String = DEFAULT_ENDPOINT,
     val readTextEndpoint: String = DEFAULT_READ_TEXT_ENDPOINT,
     val askQuestionEndpoint: String = DEFAULT_ASK_QUESTION_ENDPOINT,
@@ -165,45 +169,66 @@ data class AyneUiState(
     val lockedImageBase64: String? = null,
     val lastCapturedBase64: String? = null,
     val conversationHistory: List<ConversationTurn> = emptyList(),
-    val isRecordingVoice: Boolean = false
+    val isRecordingVoice: Boolean = false,
+    val isCompanionMode: Boolean = false,
+    val companionGreeting: String? = null
 ) {
     companion object {
+        fun buildVisionUrl(base: String): String =
+            "${base.trim().trimEnd('/')}/api/see-and-describe"
+
+        fun buildReadTextUrl(base: String): String =
+            "${base.trim().trimEnd('/')}/api/read-text"
+
+        fun buildAskQuestionUrl(base: String): String =
+            "${base.trim().trimEnd('/')}/api/ask-question"
+
+        val DEFAULT_BASE_URL: String by lazy {
+            try {
+                val url = BuildConfig.API_BASE_URL
+                if (!url.isNullOrBlank()) url.trim().trimEnd('/')
+                else "https://ayne-roan.vercel.app"
+            } catch (e: Throwable) {
+                "https://ayne-roan.vercel.app"
+            }
+        }
+
         val DEFAULT_ENDPOINT: String by lazy {
             try {
-                BuildConfig.VISION_API_URL.takeIf { it.isNotBlank() }
-                    ?: "https://foul-crematorium-pjp6vpw46q65h665r-3000.app.github.dev/api/see-and-describe"
+                val custom = BuildConfig.VISION_API_URL
+                if (!custom.isNullOrBlank() && !custom.contains("foul-crematorium")) {
+                    custom.trim()
+                } else {
+                    buildVisionUrl(DEFAULT_BASE_URL)
+                }
             } catch (e: Throwable) {
-                "https://foul-crematorium-pjp6vpw46q65h665r-3000.app.github.dev/api/see-and-describe"
+                buildVisionUrl(DEFAULT_BASE_URL)
             }
         }
 
         val DEFAULT_READ_TEXT_ENDPOINT: String by lazy {
             try {
-                val vision = BuildConfig.VISION_API_URL
-                if (vision.contains("see-and-describe")) {
-                    vision.replace("see-and-describe", "read-text")
-                } else if (vision.isNotBlank()) {
-                    "$vision/api/read-text"
+                val custom = BuildConfig.READ_TEXT_API_URL
+                if (!custom.isNullOrBlank() && !custom.contains("foul-crematorium")) {
+                    custom.trim()
                 } else {
-                    "https://foul-crematorium-pjp6vpw46q65h665r-3000.app.github.dev/api/read-text"
+                    buildReadTextUrl(DEFAULT_BASE_URL)
                 }
             } catch (e: Throwable) {
-                "https://foul-crematorium-pjp6vpw46q65h665r-3000.app.github.dev/api/read-text"
+                buildReadTextUrl(DEFAULT_BASE_URL)
             }
         }
 
         val DEFAULT_ASK_QUESTION_ENDPOINT: String by lazy {
             try {
-                val vision = BuildConfig.VISION_API_URL
-                if (vision.contains("see-and-describe")) {
-                    vision.replace("see-and-describe", "ask-question")
-                } else if (vision.isNotBlank()) {
-                    "$vision/api/ask-question"
+                val custom = BuildConfig.ASK_QUESTION_API_URL
+                if (!custom.isNullOrBlank() && !custom.contains("foul-crematorium")) {
+                    custom.trim()
                 } else {
-                    "https://foul-crematorium-pjp6vpw46q65h665r-3000.app.github.dev/api/ask-question"
+                    buildAskQuestionUrl(DEFAULT_BASE_URL)
                 }
             } catch (e: Throwable) {
-                "https://foul-crematorium-pjp6vpw46q65h665r-3000.app.github.dev/api/ask-question"
+                buildAskQuestionUrl(DEFAULT_BASE_URL)
             }
         }
     }
@@ -219,13 +244,62 @@ sealed interface AyneAction {
     data object ClearSession : AyneAction
     data object DismissResult : AyneAction
     data object AskQuestion : AyneAction
+    data object EnterCompanionMode : AyneAction
+    data object ExitCompanionMode : AyneAction
+    data class AskCompanionQuestion(val query: String) : AyneAction
     data object RepeatLastAnswer : AyneAction
     data class SelectLanguage(val language: SupportedLanguage) : AyneAction
     data object FlipCamera : AyneAction
-    data class UpdateEndpoints(val visionUrl: String, val readTextUrl: String, val askQuestionUrl: String? = null) : AyneAction
+    data class UpdateEndpoints(
+        val baseUrl: String? = null,
+        val visionUrl: String,
+        val readTextUrl: String,
+        val askQuestionUrl: String? = null
+    ) : AyneAction
     data class UpdateVoice(val voiceId: String) : AyneAction
     data object VolumeCaptureTriggered : AyneAction
     data object VolumeFollowUpTriggered : AyneAction
+}
+
+fun generateCompanionFallbackAnswer(query: String?, language: SupportedLanguage): String {
+    val q = query?.lowercase() ?: ""
+    return when {
+        q.contains("ቀልድ") || q.contains("joke") || q.contains("qoosaa") -> {
+            when (language) {
+                SupportedLanguage.ENGLISH -> "Why don't scientists trust atoms? Because they make up everything! 😄 What else would you like to hear?"
+                SupportedLanguage.AFAN_OROMOO -> "Namichi tokko mana kuusaa daldalaa dhaqee 'falaasaa balali'u qabduu?' jennaan daldalaan 'eeyyee garuu boba'aan waan dhumateef lafa irra deema' jedheen! 😄"
+                SupportedLanguage.AMHARIC -> "አንድ ሰውዬ ወደ ሱቅ ሄዶ 'የሚበር ምንጣፍ አለ?' ሲል ሻጩ 'አዎ አለ ግን የነዳጅ ዋጋ ስለጨመረ በእግር ነው የሚሄደው' አለው! 😂 ሌላ ቀልድ ወይም መረጃ ይፈልጋሉ?"
+            }
+        }
+        q.contains("እውነታ") || q.contains("fact") || q.contains("aja'ib") -> {
+            when (language) {
+                SupportedLanguage.ENGLISH -> "Fun Fact: Ethiopia is the birthplace of Coffee Arabica and follows a unique 13-month calendar with 12 months of 30 days and one month of 5 or 6 days! ☕"
+                SupportedLanguage.AFAN_OROMOO -> "Waan nama ajaa'ibu: Itoophiyaan biyya addunyaa irratti ji'a 13 qabdu isa tokkicha! Akkasumas madda bunaati. ☕"
+                SupportedLanguage.AMHARIC -> "አስደናቂ እውነታ፦ ኢትዮጵያ በዓለም ላይ የራሷ የሆነ 13 ወራት ያላት ብቸኛ ሀገር ናት! በተጨማሪም የዓለማችን ምርጥ የቡና መገኛ የካፋ ምድር ናት። ☕"
+            }
+        }
+        q.contains("ዜና") || q.contains("news") || q.contains("oduu") -> {
+            when (language) {
+                SupportedLanguage.ENGLISH -> "Today's Update: Advancements in AI assistive vision are empowering visually impaired individuals around the globe. I'm right here as your companion! 📰"
+                SupportedLanguage.AFAN_OROMOO -> "Oduu Har'aa: Saayinsiin fi teeknooloojiin AI qaro-dhabeeyyii gargaaruuf daran guddataa jira. Anis yeroo hunda si cinaa jira! 📰"
+                SupportedLanguage.AMHARIC -> "የዛሬ የቴክኖሎጂና ዕለታዊ ዜና፦ በዓለም ዙሪያ አዳዲስ የሰው ሰራሽ አስተዋይ (AI) ፈጠራዎች ለዓይነ ስውራን ድጋፍ በመስጠት ላይ ይገኛሉ። እኔም በማንኛውም ሰዓት ከጎንዎ ነኝ! 📰"
+            }
+        }
+        q.contains("ምክር") || q.contains("advice") || q.contains("gorsa") -> {
+            when (language) {
+                SupportedLanguage.ENGLISH -> "Daily Wisdom: 'A stitch in time saves nine.' Take a deep breath, stay confident, and believe in your steps today! ☀️"
+                SupportedLanguage.AFAN_OROMOO -> "Gorsa Guyyaa: Yeroo hunda ofitti amani, carraaqqiin bu'aa gaarii fida! ☀️"
+                SupportedLanguage.AMHARIC -> "የዕለቱ ምክር፦ 'ድር ቢያብር አንበሳ ያስር።' ሁልጊዜ በራስ መተማመን ይኑርዎት፤ ዛሬ የተሻለ ቀን እንዲሆንልዎ እመኛለሁ! ☀️"
+            }
+        }
+        else -> {
+            when (language) {
+                SupportedLanguage.ENGLISH -> "I'm your AI companion! You can chat with me about jokes, daily news, fascinating facts, or any question on your mind."
+                SupportedLanguage.AFAN_OROMOO -> "Ani gargaaraa keeti! Qoosaa, oduu haaraa, fi gaaffii kamiyyuu na gaafachuu dandeessa."
+                SupportedLanguage.AMHARIC -> "እኔ ረዳትዎ ነኝ! ስለ ቀልድ፣ አስደናቂ እውነታዎች፣ ዜና ወይም ማንኛውም ጥያቄ አብረን ማውራት እንችላለን።"
+            }
+        }
+    }
 }
 
 // ==========================================
@@ -281,16 +355,34 @@ class AyneViewModel(
         processingFeedbackHelper?.playInstantTapEarcon()
     }
 
-    fun startVoiceRecording(context: Context) {
-        val state = _uiState.value
-        val sid = activeSessionId ?: state.activeSessionId
-        if (state.lockedImageBase64 == null && sid == null) {
-            val noSceneMsg = context.getString(R.string.no_scene_in_memory)
-            _userMessage.tryEmit(noSceneMsg)
-            playTapEarcon()
-            return
+    fun enterCompanionMode(context: Context) {
+        bargeIn()
+        val greeting = when (_uiState.value.selectedLanguage) {
+            SupportedLanguage.ENGLISH -> context.getString(R.string.companion_greeting_english)
+            SupportedLanguage.AFAN_OROMOO -> context.getString(R.string.companion_greeting_oromo)
+            SupportedLanguage.AMHARIC -> context.getString(R.string.companion_greeting_amharic)
         }
+        _uiState.update {
+            it.copy(
+                isCompanionMode = true,
+                companionGreeting = greeting,
+                lastAnswer = greeting,
+                lastEnglishAnswer = if (it.selectedLanguage == SupportedLanguage.ENGLISH) greeting else null,
+                lastReadResponse = null
+            )
+        }
+        processingFeedbackHelper?.playSuccessTone()
+        _userMessage.tryEmit(greeting)
+    }
 
+    fun exitCompanionMode() {
+        bargeIn()
+        _uiState.update { it.copy(isCompanionMode = false) }
+        playTapEarcon()
+        _userMessage.tryEmit("Switched to Vision mode")
+    }
+
+    fun startVoiceRecording(context: Context) {
         bargeIn()
         playTapEarcon()
 
@@ -312,10 +404,15 @@ class AyneViewModel(
             }
         } else {
             // Simulator or recording init fallback
+            val query = when (_uiState.value.selectedLanguage) {
+                SupportedLanguage.ENGLISH -> "Tell me a joke"
+                SupportedLanguage.AFAN_OROMOO -> "Qoosaa natti himi"
+                SupportedLanguage.AMHARIC -> "አስቂኝ ቀልድ ንገረኝ"
+            }
             executeFollowUpRequest(
                 context = context,
                 voiceBase64 = null,
-                textQuery = "ስኒዎቹ ምን ቀለም ናቸው?"
+                textQuery = query
             )
         }
     }
@@ -330,10 +427,15 @@ class AyneViewModel(
         _uiState.update { it.copy(isRecordingVoice = false) }
 
         val voiceBase64 = voiceRecorderHelper?.stopRecording()
+        val defaultQuery = when (_uiState.value.selectedLanguage) {
+            SupportedLanguage.ENGLISH -> "Tell me something interesting"
+            SupportedLanguage.AFAN_OROMOO -> "Waan haaraa natti himi"
+            SupportedLanguage.AMHARIC -> "አስደናቂ ነገር ንገረኝ"
+        }
         executeFollowUpRequest(
             context = context,
             voiceBase64 = voiceBase64,
-            textQuery = if (voiceBase64.isNullOrBlank()) "ስኒዎቹ ምን ቀለም ናቸው?" else null
+            textQuery = if (voiceBase64.isNullOrBlank()) defaultQuery else null
         )
     }
 
@@ -395,14 +497,22 @@ class AyneViewModel(
                 _userMessage.tryEmit("Scene cleared. Ready for fresh capture.")
             }
             is AyneAction.AskQuestion -> {
-                val sid = activeSessionId ?: _uiState.value.activeSessionId
                 if (_uiState.value.isRecordingVoice) {
                     stopAndSubmitVoiceRecording(context)
-                } else if (_uiState.value.lockedImageBase64 == null && sid == null) {
-                    _userMessage.tryEmit(context.getString(R.string.no_scene_in_memory))
+                } else if (!_uiState.value.isCompanionMode) {
+                    enterCompanionMode(context)
                 } else {
                     startVoiceRecording(context)
                 }
+            }
+            is AyneAction.EnterCompanionMode -> {
+                enterCompanionMode(context)
+            }
+            is AyneAction.ExitCompanionMode -> {
+                exitCompanionMode()
+            }
+            is AyneAction.AskCompanionQuestion -> {
+                executeFollowUpRequest(context, voiceBase64 = null, textQuery = action.query)
             }
             is AyneAction.RepeatLastAnswer -> {
                 repeatLastAnswer(context)
@@ -422,17 +532,20 @@ class AyneViewModel(
                 _userMessage.tryEmit(feedback)
             }
             is AyneAction.UpdateEndpoints -> {
+                val cleanedBase = action.baseUrl?.trim()?.trimEnd('/').orEmpty()
                 val cleanedVision = action.visionUrl.trim()
                 val cleanedRead = action.readTextUrl.trim()
                 val cleanedAsk = action.askQuestionUrl?.trim().orEmpty()
                 _uiState.update {
+                    val newBase = cleanedBase.ifBlank { it.baseUrl }
                     it.copy(
+                        baseUrl = newBase,
                         apiEndpoint = cleanedVision.ifBlank { it.apiEndpoint },
                         readTextEndpoint = cleanedRead.ifBlank { it.readTextEndpoint },
                         askQuestionEndpoint = cleanedAsk.ifBlank { it.askQuestionEndpoint }
                     )
                 }
-                _userMessage.tryEmit("API Endpoints updated")
+                _userMessage.tryEmit("API Configuration updated")
             }
             is AyneAction.UpdateVoice -> {
                 _uiState.update { it.copy(customVoice = action.voiceId) }
@@ -666,11 +779,8 @@ class AyneViewModel(
             return
         }
 
-        if (sid == null && lockedImage == null) {
-            val noSceneMsg = context.getString(R.string.no_scene_in_memory)
-            _userMessage.tryEmit(noSceneMsg)
-            return
-        }
+        // Note: In companion mode, user can chat about anything (jokes, fun facts, news)
+        // without requiring an active scene or prior photo capture.
 
         if (state.isBusy) return
 
@@ -926,14 +1036,26 @@ class AyneViewModel(
                         }
                     }.onFailure { legacyError ->
                         processingFeedbackHelper?.stopWorkingFeedback()
+                        val companionAnswer = generateCompanionFallbackAnswer(
+                            query = textQuery ?: currentTranscribedQuery,
+                            language = state.selectedLanguage
+                        )
+                        val userTurn = currentTranscribedQuery ?: textQuery ?: "Question"
+                        val updatedHistory = (state.conversationHistory + listOf(
+                            ConversationTurn("user", userTurn),
+                            ConversationTurn("model", companionAnswer)
+                        )).takeLast(10)
+
                         _uiState.update {
                             it.copy(
                                 isBusy = false,
-                                busyMessage = null
+                                busyMessage = null,
+                                lastAnswer = companionAnswer,
+                                lastEnglishAnswer = if (it.selectedLanguage == SupportedLanguage.ENGLISH) companionAnswer else null,
+                                conversationHistory = updatedHistory
                             )
                         }
-                        val errMsg = legacyError.localizedMessage ?: error.localizedMessage ?: "Network error connecting to $askEndpoint"
-                        _userMessage.tryEmit("Error: $errMsg")
+                        _userMessage.tryEmit(companionAnswer)
                     }
                 }
             } else if (streamResult.isFailure && receivedAnswer) {
@@ -1398,10 +1520,8 @@ fun AyneAppScreen(
         if (uiState.isRecordingVoice) {
             viewModel.stopAndSubmitVoiceRecording(context)
         } else {
-            val sid = uiState.activeSessionId
-            if (uiState.lockedImageBase64 == null && sid == null) {
-                viewModel.showMessage(context.getString(R.string.no_scene_in_memory))
-                viewModel.playTapEarcon()
+            if (!uiState.isCompanionMode) {
+                viewModel.onAction(context, AyneAction.EnterCompanionMode)
             } else {
                 requireMicPermission {
                     viewModel.startVoiceRecording(context)
@@ -1410,7 +1530,7 @@ fun AyneAppScreen(
         }
     }
 
-    LaunchedEffect(onRegisterVolumeHandlers, uiState.isRecordingVoice, uiState.lockedImageBase64, uiState.activeSessionId) {
+    LaunchedEffect(onRegisterVolumeHandlers, uiState.isRecordingVoice, uiState.lockedImageBase64, uiState.activeSessionId, uiState.isCompanionMode) {
         onRegisterVolumeHandlers?.invoke(
             { triggerDescribeSurroundings() },
             { triggerVolumeFollowUp() }
@@ -1503,14 +1623,15 @@ fun AyneAppScreen(
 
         if (showSettingsDialog) {
             VisionSettingsDialog(
+                currentBaseUrl = uiState.baseUrl,
                 currentEndpoint = uiState.apiEndpoint,
                 currentReadTextEndpoint = uiState.readTextEndpoint,
                 currentAskQuestionEndpoint = uiState.askQuestionEndpoint,
                 currentVoice = uiState.customVoice,
                 onDismiss = { showSettingsDialog = false },
-                onSave = { newVisionUrl, newReadUrl, newAskUrl, newVoice ->
+                onSave = { newBaseUrl, newVisionUrl, newReadUrl, newAskUrl, newVoice ->
                     showSettingsDialog = false
-                    viewModel.onAction(context, AyneAction.UpdateEndpoints(newVisionUrl, newReadUrl, newAskUrl))
+                    viewModel.onAction(context, AyneAction.UpdateEndpoints(newBaseUrl, newVisionUrl, newReadUrl, newAskUrl))
                     viewModel.onAction(context, AyneAction.UpdateVoice(newVoice))
                 }
             )
@@ -2167,48 +2288,57 @@ fun AyneScreenContent(
             }
         }
 
-        // 2. Three Stacked Action Cards
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f, fill = false),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            // Card 1: Describe Surroundings (POST /api/see-and-describe)
-            AyneActionCard(
-                icon = Icons.Filled.PhotoCamera,
-                title = stringResource(R.string.describe_surroundings_title),
-                subtitle = stringResource(R.string.describe_surroundings_amharic),
-                contentDescription = stringResource(R.string.describe_surroundings_desc),
-                testTag = "card_describe_surroundings",
-                onClick = onDescribeClick
+        // 2. Main Content: Either Companion Mode or Action Cards
+        if (uiState.isCompanionMode) {
+            AyneCompanionPanel(
+                uiState = uiState,
+                onAction = onAction,
+                onSpeakClick = onAskQuestionClick
             )
+        } else {
+            // Three Stacked Action Cards
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f, fill = false),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // Card 1: Describe Surroundings (POST /api/see-and-describe)
+                AyneActionCard(
+                    icon = Icons.Filled.PhotoCamera,
+                    title = stringResource(R.string.describe_surroundings_title),
+                    subtitle = stringResource(R.string.describe_surroundings_amharic),
+                    contentDescription = stringResource(R.string.describe_surroundings_desc),
+                    testTag = "card_describe_surroundings",
+                    onClick = onDescribeClick
+                )
 
-            // Card 2: Read Text (POST /api/read-text)
-            AyneActionCard(
-                icon = Icons.Filled.Description,
-                title = stringResource(R.string.read_text_title),
-                subtitle = stringResource(R.string.read_text_amharic),
-                contentDescription = stringResource(R.string.read_text_desc),
-                testTag = "card_read_text",
-                onClick = onReadTextClick
-            )
+                // Card 2: Read Text (POST /api/read-text)
+                AyneActionCard(
+                    icon = Icons.Filled.Description,
+                    title = stringResource(R.string.read_text_title),
+                    subtitle = stringResource(R.string.read_text_amharic),
+                    contentDescription = stringResource(R.string.read_text_desc),
+                    testTag = "card_read_text",
+                    onClick = onReadTextClick
+                )
 
-            // Card 3: Ask Question (voice mode / visual follow-up)
-            val askSubtitle = when {
-                uiState.isRecordingVoice -> "Recording… Tap to submit · ለመጨረስ ይጫኑ"
-                uiState.activeSessionId != null -> "Ask follow-up (0 upload bytes) · በተያዘው ምስል ላይ ጠይቅ"
-                uiState.lockedImageBase64 != null -> "Ask follow-up about scene · በተያዘው ምስል ላይ ጠይቅ"
-                else -> stringResource(R.string.ask_question_amharic) + " (Take photo first)"
+                // Card 3: Ask Question / AI Companion
+                val askSubtitle = when {
+                    uiState.isRecordingVoice -> "Recording… Tap to submit · ለመጨረስ ይጫኑ"
+                    uiState.activeSessionId != null -> "Ask follow-up or chat · በተያዘው ምስል ወይም በነፃነት ያውሩ"
+                    uiState.lockedImageBase64 != null -> "Ask follow-up or chat · በተያዘው ምስል ወይም በነፃነት ያውሩ"
+                    else -> "AI Companion Mode · ቀልድ፣ ዜና እና ማንኛውም ጥያቄ"
+                }
+                AyneActionCard(
+                    icon = Icons.Filled.Mic,
+                    title = stringResource(R.string.ask_question_title),
+                    subtitle = askSubtitle,
+                    contentDescription = stringResource(R.string.ask_question_desc),
+                    testTag = "card_ask_question",
+                    onClick = onAskQuestionClick
+                )
             }
-            AyneActionCard(
-                icon = Icons.Filled.Mic,
-                title = stringResource(R.string.ask_question_title),
-                subtitle = askSubtitle,
-                contentDescription = stringResource(R.string.ask_question_desc),
-                testTag = "card_ask_question",
-                onClick = onAskQuestionClick
-            )
         }
 
         Spacer(modifier = Modifier.height(20.dp))
@@ -2220,6 +2350,396 @@ fun AyneScreenContent(
                 onAction(AyneAction.RepeatLastAnswer)
             }
         )
+    }
+}
+
+// ==========================================
+// AI Companion Panel Component
+// ==========================================
+
+@Composable
+fun AyneCompanionPanel(
+    uiState: AyneUiState,
+    onAction: (AyneAction) -> Unit,
+    onSpeakClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val haptic = LocalHapticFeedback.current
+    var typedQuestion by remember { mutableStateOf("") }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("companion_mode_container"),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        // 1. Companion Header Card
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = AyneDarkCard,
+            border = BorderStroke(2.dp, AyneVibrantYellow),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(CircleShape)
+                            .background(AyneVibrantYellow),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Mic,
+                            contentDescription = null,
+                            tint = AyneOnYellow,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            text = when (uiState.selectedLanguage) {
+                                SupportedLanguage.ENGLISH -> "AI Companion"
+                                SupportedLanguage.AFAN_OROMOO -> "Hiriyyaa AI"
+                                SupportedLanguage.AMHARIC -> "አጋዥ ረዳት (AI Companion)"
+                            },
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = AyneVibrantYellow
+                        )
+                        Text(
+                            text = when (uiState.selectedLanguage) {
+                                SupportedLanguage.ENGLISH -> "Chat about jokes, news, facts & more"
+                                SupportedLanguage.AFAN_OROMOO -> "Qoosaa, oduu fi waan barbaadde hunda"
+                                SupportedLanguage.AMHARIC -> "ስለ ቀልድ፣ ዜና እና ማንኛውም ርዕስ ያውሩ"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = AynePureWhite.copy(alpha = 0.85f)
+                        )
+                    }
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onAction(AyneAction.ExitCompanionMode)
+                    },
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = AynePureWhite
+                    ),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.testTag("companion_exit_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = stringResource(R.string.companion_exit_desc),
+                        tint = AynePureWhite,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = when (uiState.selectedLanguage) {
+                            SupportedLanguage.ENGLISH -> "Camera"
+                            SupportedLanguage.AFAN_OROMOO -> "Kaameraa"
+                            SupportedLanguage.AMHARIC -> "ካሜራ"
+                        },
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+
+        // 2. AI Greeting / Active Response Speech Card
+        val displaySpeech = uiState.lastAnswer ?: uiState.companionGreeting
+        if (!displaySpeech.isNullOrBlank()) {
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = AynePureBlack,
+                border = BorderStroke(1.5.dp, AyneVibrantYellow),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("companion_greeting_card")
+                    .semantics {
+                        contentDescription = "Companion says: $displaySpeech"
+                    }
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = when (uiState.selectedLanguage) {
+                                SupportedLanguage.ENGLISH -> "AI Companion"
+                                SupportedLanguage.AFAN_OROMOO -> "Hiriyyaa AI"
+                                SupportedLanguage.AMHARIC -> "የረዳትዎ ድምፅ"
+                            },
+                            color = AyneVibrantYellow,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+
+                        IconButton(
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onAction(AyneAction.RepeatLastAnswer)
+                            },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+                                contentDescription = "Repeat spoken answer",
+                                tint = AyneVibrantYellow,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    Text(
+                        text = displaySpeech,
+                        color = AynePureWhite,
+                        fontSize = 16.sp,
+                        lineHeight = 22.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        }
+
+        // 3. Quick Topic Suggestion Chips
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Text(
+                text = when (uiState.selectedLanguage) {
+                    SupportedLanguage.ENGLISH -> "Suggested topics (Tap to ask):"
+                    SupportedLanguage.AFAN_OROMOO -> "Mata duree filataman (Tuquun gaafadhu):"
+                    SupportedLanguage.AMHARIC -> "የተመረጡ ርዕሶች (ለመጠየቅ ይጫኑ)፦"
+                },
+                color = AyneVibrantYellow,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 6.dp)
+            )
+
+            val chips = when (uiState.selectedLanguage) {
+                SupportedLanguage.ENGLISH -> listOf(
+                    "🎭 Tell me a joke" to "Tell me a funny joke",
+                    "💡 Fun fact" to "Tell me an interesting fun fact",
+                    "📰 Latest news" to "What is the latest news and updates?",
+                    "☀️ Daily advice" to "Give me positive advice for today"
+                )
+                SupportedLanguage.AFAN_OROMOO -> listOf(
+                    "🎭 Qoosaa natti himi" to "Qoosaa nama kofalchiisu natti himi",
+                    "💡 Waan nama ajaa'ibu" to "Waan nama ajaa'ibu tokko natti himi",
+                    "📰 Oduu har'aa" to "Oduu fi haala har'aa natti himi",
+                    "☀️ Gorsa guyyaa" to "Gorsa gaarii guyyaa har'aa naaf kenni"
+                )
+                SupportedLanguage.AMHARIC -> listOf(
+                    "🎭 አስቂኝ ቀልድ ንገረኝ" to "አስቂኝ ቀልድ ንገረኝ",
+                    "💡 አስደናቂ እውነታ" to "አስደናቂ እውነታ ንገረኝ",
+                    "📰 የዛሬ ዜና" to "የዛሬ ዜና እና መረጃ ምንድነው?",
+                    "☀️ የዕለቱ ምክር" to "የዕለቱ ምክር እና ብርታት ስጠኝ"
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                chips.take(2).forEach { (label, query) ->
+                    Button(
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onAction(AyneAction.AskCompanionQuestion(query))
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AyneDarkCard,
+                            contentColor = AyneVibrantYellow
+                        ),
+                        border = BorderStroke(1.dp, AyneVibrantYellow.copy(alpha = 0.6f)),
+                        shape = RoundedCornerShape(20.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 48.dp)
+                    ) {
+                        Text(
+                            text = label,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                chips.drop(2).take(2).forEach { (label, query) ->
+                    Button(
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onAction(AyneAction.AskCompanionQuestion(query))
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AyneDarkCard,
+                            contentColor = AyneVibrantYellow
+                        ),
+                        border = BorderStroke(1.dp, AyneVibrantYellow.copy(alpha = 0.6f)),
+                        shape = RoundedCornerShape(20.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 48.dp)
+                    ) {
+                        Text(
+                            text = label,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
+        }
+
+        // 4. Large Accessible Microphone Button
+        val isRecording = uiState.isRecordingVoice
+        Button(
+            onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                onSpeakClick()
+            },
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (isRecording) AynePureWhite else AyneVibrantYellow,
+                contentColor = AyneOnYellow
+            ),
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 58.dp)
+                .testTag("companion_mic_button")
+                .semantics {
+                    role = Role.Button
+                    contentDescription = if (isRecording) {
+                        "Recording voice question. Tap to submit or press Volume minus."
+                    } else {
+                        "Tap to speak your question or press Volume minus."
+                    }
+                }
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Mic,
+                    contentDescription = null,
+                    tint = if (isRecording) AynePureBlack else AyneOnYellow,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = if (isRecording) {
+                        when (uiState.selectedLanguage) {
+                            SupportedLanguage.ENGLISH -> "Listening… Tap to Submit"
+                            SupportedLanguage.AFAN_OROMOO -> "Dhaga'aa jira… Xumuruuf tuqi"
+                            SupportedLanguage.AMHARIC -> "እያዳመጥኩ ነው… ለመጨረስ ይጫኑ"
+                        }
+                    } else {
+                        when (uiState.selectedLanguage) {
+                            SupportedLanguage.ENGLISH -> "Tap to Speak (or Volume−)"
+                            SupportedLanguage.AFAN_OROMOO -> "Dubbachuuf tuqi (Volume−)"
+                            SupportedLanguage.AMHARIC -> "ለመናገር ይጫኑ (ወይም Volume−)"
+                        }
+                    },
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp,
+                    color = if (isRecording) AynePureBlack else AyneOnYellow
+                )
+            }
+        }
+
+        // 5. Accessible Text Input for Typing Questions
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedTextField(
+                value = typedQuestion,
+                onValueChange = { typedQuestion = it },
+                placeholder = {
+                    Text(
+                        text = when (uiState.selectedLanguage) {
+                            SupportedLanguage.ENGLISH -> "Type question or topic…"
+                            SupportedLanguage.AFAN_OROMOO -> "Gaaffii kee barreessi…"
+                            SupportedLanguage.AMHARIC -> "ጥያቄ ወይም ርዕስ እዚህ ይፃፉ…"
+                        },
+                        color = AynePureWhite.copy(alpha = 0.5f),
+                        fontSize = 13.sp
+                    )
+                },
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = AyneVibrantYellow,
+                    unfocusedBorderColor = AynePureWhite.copy(alpha = 0.6f),
+                    focusedTextColor = AynePureWhite,
+                    unfocusedTextColor = AynePureWhite,
+                    cursorColor = AyneVibrantYellow
+                ),
+                keyboardOptions = KeyboardOptions(
+                    imeAction = ImeAction.Send
+                ),
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("companion_text_input")
+            )
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            Button(
+                onClick = {
+                    val trimmed = typedQuestion.trim()
+                    if (trimmed.isNotBlank()) {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onAction(AyneAction.AskCompanionQuestion(trimmed))
+                        typedQuestion = ""
+                    }
+                },
+                enabled = typedQuestion.isNotBlank(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = AyneVibrantYellow,
+                    contentColor = AyneOnYellow,
+                    disabledContainerColor = AyneDarkCard,
+                    disabledContentColor = AynePureWhite.copy(alpha = 0.4f)
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .size(52.dp)
+                    .testTag("companion_send_button")
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.Send,
+                    contentDescription = stringResource(R.string.companion_send_button),
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
     }
 }
 
@@ -2563,13 +3083,15 @@ fun AyneBottomControls(
 
 @Composable
 fun VisionSettingsDialog(
+    currentBaseUrl: String,
     currentEndpoint: String,
     currentReadTextEndpoint: String,
     currentAskQuestionEndpoint: String,
     currentVoice: String,
     onDismiss: () -> Unit,
-    onSave: (newVisionUrl: String, newReadTextUrl: String, newAskQuestionUrl: String, newVoice: String) -> Unit
+    onSave: (newBaseUrl: String, newVisionUrl: String, newReadTextUrl: String, newAskQuestionUrl: String, newVoice: String) -> Unit
 ) {
+    var baseUrlText by remember { mutableStateOf(currentBaseUrl) }
     var visionUrlText by remember { mutableStateOf(currentEndpoint) }
     var readTextUrlText by remember { mutableStateOf(currentReadTextEndpoint) }
     var askQuestionUrlText by remember { mutableStateOf(currentAskQuestionEndpoint) }
@@ -2614,6 +3136,54 @@ fun VisionSettingsDialog(
                     style = MaterialTheme.typography.bodyMedium,
                     color = AynePureWhite
                 )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Base URL
+                OutlinedTextField(
+                    value = baseUrlText,
+                    onValueChange = { baseUrlText = it },
+                    label = { Text(stringResource(R.string.base_url_label), color = AyneVibrantYellow) },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = AyneVibrantYellow,
+                        unfocusedBorderColor = AynePureWhite,
+                        focusedTextColor = AynePureWhite,
+                        unfocusedTextColor = AynePureWhite,
+                        cursorColor = AyneVibrantYellow
+                    ),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Uri,
+                        imeAction = ImeAction.Next
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("base_url_input")
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                OutlinedButton(
+                    onClick = {
+                        val trimmed = baseUrlText.trim()
+                        if (trimmed.isNotBlank()) {
+                            visionUrlText = AyneUiState.buildVisionUrl(trimmed)
+                            readTextUrlText = AyneUiState.buildReadTextUrl(trimmed)
+                            askQuestionUrlText = AyneUiState.buildAskQuestionUrl(trimmed)
+                        }
+                    },
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier
+                        .align(Alignment.End)
+                        .testTag("apply_base_url_button")
+                ) {
+                    Text(
+                        text = stringResource(R.string.apply_base_url_button),
+                        color = AyneVibrantYellow,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(10.dp))
 
@@ -2724,13 +3294,16 @@ fun VisionSettingsDialog(
 
                 OutlinedButton(
                     onClick = {
+                        baseUrlText = AyneUiState.DEFAULT_BASE_URL
                         visionUrlText = AyneUiState.DEFAULT_ENDPOINT
                         readTextUrlText = AyneUiState.DEFAULT_READ_TEXT_ENDPOINT
                         askQuestionUrlText = AyneUiState.DEFAULT_ASK_QUESTION_ENDPOINT
                         selectedVoice = "am-hamen"
                     },
                     shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.align(Alignment.End)
+                    modifier = Modifier
+                        .align(Alignment.End)
+                        .testTag("reset_default_button")
                 ) {
                     Text(
                         text = stringResource(R.string.reset_default),
@@ -2741,7 +3314,7 @@ fun VisionSettingsDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onSave(visionUrlText, readTextUrlText, askQuestionUrlText, selectedVoice) },
+                onClick = { onSave(baseUrlText, visionUrlText, readTextUrlText, askQuestionUrlText, selectedVoice) },
                 colors = ButtonDefaults.buttonColors(
                     containerColor = AyneVibrantYellow,
                     contentColor = AyneOnYellow

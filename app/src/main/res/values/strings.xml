@@ -56,6 +56,8 @@
     <string name="settings_button_desc">API endpoint settings</string>
     <string name="settings_dialog_title">Mirkuz Vision API Endpoints</string>
     <string name="settings_dialog_subtitle">Endpoints configured from environment variables:</string>
+    <string name="base_url_label">API Base URL</string>
+    <string name="apply_base_url_button">Apply Base URL</string>
     <string name="vision_endpoint_label">See &amp; Describe URL</string>
     <string name="read_text_endpoint_label">Read Text &amp; Signs URL</string>
     <string name="ask_question_endpoint_label">Ask Question (Real-time Stream) URL</string>
@@ -94,4 +96,21 @@
     <string name="hide_verbatim_text">Hide Verbatim Text · ዝርዝር ጽሑፉን ደብቅ</string>
     <string name="text_cut_off_warning">ጽሑፉ በከፊል ተቆርጧል፤ እባክዎ ካሜራውን ትንሽ ወደ ኋላ ያርቁት</string>
     <string name="text_blurry_warning">ምስሉ ደብዛዛ ነው፤ እባክዎ ካሜራውን ሳያንቀሳቅሱ ያቆዩት</string>
+    
+    <!-- AI Companion Mode -->
+    <string name="companion_mode_title">AI Companion · አጋዥ ረዳት</string>
+    <string name="companion_mode_subtitle">Chat about anything: jokes, fun facts, news, and more</string>
+    <string name="companion_greeting_amharic">ሰላም! እኔ ረዳትዎ ነኝ፤ ዛሬ ምን ልርዳዎት? ማንኛውንም ጥያቄ መጠየቅ፣ አስቂኝ ቀልዶች፣ አስደናቂ እውነታዎችን ወይም ዜና ማውራት ይችላሉ!</string>
+    <string name="companion_greeting_english">Hello! I am your AI companion. How can I help you today? Feel free to ask me anything—jokes, fun facts, news, or general questions!</string>
+    <string name="companion_greeting_oromo">Akkam! Ani gargaaraa keeti, har\'a maal si gargaaruu danda\'a? Waan barbaadde hunda—qoosaa, oduu fi odeeffannoo adda addaa na gaafachuu dandeessa!</string>
+    <string name="chip_joke">🎭 Tell a joke · ቀልድ ንገረኝ</string>
+    <string name="chip_fun_fact">💡 Fun fact · አስደናቂ እውነታ</string>
+    <string name="chip_news">📰 Latest news · የዛሬ ዜና</string>
+    <string name="chip_daily_advice">☀️ Daily advice · የዕለቱ ምክር</string>
+    <string name="chip_ask_anything">❓ Ask anything · ማንኛውንም ጠይቅ</string>
+    <string name="companion_exit_button">Back to Vision · ወደ ካሜራ ተመለስ</string>
+    <string name="companion_exit_desc">Exit companion mode and return to camera view</string>
+    <string name="companion_type_hint">Type a question or chat here… · እዚህ ይፃፉ</string>
+    <string name="companion_send_button">Send</string>
+    <string name="companion_mic_button">Hold or Tap to Speak · ለመናገር ይጫኑ</string>
 </resources>

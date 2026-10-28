@@ -19,7 +19,7 @@ class VisualSessionManager(
     private val onAudioReceived: (audioBytes: ByteArray, spokenText: String) -> Unit = { _, _ -> },
     private val onError: (String) -> Unit = {}
 ) {
-    var apiUrl: String = "https://foul-crematorium-pjp6vpw46q65h665r-3000.app.github.dev/api/see-and-describe"
+    var apiUrl: String = "https://ayne-roan.vercel.app/api/see-and-describe"
 
     // Server-cached visual session ID for zero-upload follow-up turns
     var activeSessionId: String? = null

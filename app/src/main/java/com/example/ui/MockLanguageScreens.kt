@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.AyneAction
 import com.example.AyneActionCard
+import com.example.AyneCompanionPanel
 import com.example.AyneTopBar
 import com.example.AyneUiState
 import com.example.SupportedLanguage
@@ -376,52 +377,60 @@ fun EnglishMockScreen(
             }
 
             // 6. Three Stacked Action Cards (Wired directly to active camera & API)
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                AyneActionCard(
-                    icon = Icons.Filled.PhotoCamera,
-                    title = "Describe Surroundings",
-                    subtitle = "Explore what's around you",
-                    contentDescription = "Describe surroundings. Explore what is around you button",
-                    testTag = "card_describe_surroundings_en",
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onDescribeClick()
-                    }
+            if (uiState.isCompanionMode) {
+                AyneCompanionPanel(
+                    uiState = uiState,
+                    onAction = onAction,
+                    onSpeakClick = onAskQuestionClick
                 )
+            } else {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    AyneActionCard(
+                        icon = Icons.Filled.PhotoCamera,
+                        title = "Describe Surroundings",
+                        subtitle = "Explore what's around you",
+                        contentDescription = "Describe surroundings. Explore what is around you button",
+                        testTag = "card_describe_surroundings_en",
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onDescribeClick()
+                        }
+                    )
 
-                AyneActionCard(
-                    icon = Icons.Filled.Description,
-                    title = "Read Text",
-                    subtitle = "Read signs, documents & labels",
-                    contentDescription = "Read text. Read signs, documents and labels button",
-                    testTag = "card_read_text_en",
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onReadTextClick()
+                    AyneActionCard(
+                        icon = Icons.Filled.Description,
+                        title = "Read Text",
+                        subtitle = "Read signs, documents & labels",
+                        contentDescription = "Read text. Read signs, documents and labels button",
+                        testTag = "card_read_text_en",
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onReadTextClick()
+                        }
+                    )
+
+                    val askSubtitle = when {
+                        uiState.isRecordingVoice -> "Recording… Tap to submit"
+                        uiState.activeSessionId != null -> "Ask follow-up or chat"
+                        uiState.lockedImageBase64 != null -> "Ask follow-up or chat"
+                        else -> "AI Companion · Chat about jokes, fun facts & news"
                     }
-                )
 
-                val askSubtitle = when {
-                    uiState.isRecordingVoice -> "Recording… Tap to submit"
-                    uiState.activeSessionId != null -> "Ask follow-up (0 image bytes)"
-                    uiState.lockedImageBase64 != null -> "Ask follow-up about scene"
-                    else -> "Ask about captured scene (Take photo first)"
+                    AyneActionCard(
+                        icon = Icons.Filled.Mic,
+                        title = "Ask Question",
+                        subtitle = askSubtitle,
+                        contentDescription = "Ask question. AI Companion button",
+                        testTag = "card_ask_question_en",
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onAskQuestionClick()
+                        }
+                    )
                 }
-
-                AyneActionCard(
-                    icon = Icons.Filled.Mic,
-                    title = "Ask Question",
-                    subtitle = askSubtitle,
-                    contentDescription = "Ask question. Ask about the captured scene button",
-                    testTag = "card_ask_question_en",
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onAskQuestionClick()
-                    }
-                )
             }
         }
 
@@ -766,52 +775,60 @@ fun AfaanOromooMockScreen(
             }
 
             // 6. Three Stacked Action Cards (Wired directly to active camera & API)
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                AyneActionCard(
-                    icon = Icons.Filled.PhotoCamera,
-                    title = "Naannoo Ibsi",
-                    subtitle = "Wanta naannoo keetti jiru bari",
-                    contentDescription = "Naannoo ibsi. Wanta naannoo keetti jiru baruuf tuqi",
-                    testTag = "card_describe_surroundings_om",
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onDescribeClick()
-                    }
+            if (uiState.isCompanionMode) {
+                AyneCompanionPanel(
+                    uiState = uiState,
+                    onAction = onAction,
+                    onSpeakClick = onAskQuestionClick
                 )
+            } else {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    AyneActionCard(
+                        icon = Icons.Filled.PhotoCamera,
+                        title = "Naannoo Ibsi",
+                        subtitle = "Wanta naannoo keetti jiru bari",
+                        contentDescription = "Naannoo ibsi. Wanta naannoo keetti jiru baruuf tuqi",
+                        testTag = "card_describe_surroundings_om",
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onDescribeClick()
+                        }
+                    )
 
-                AyneActionCard(
-                    icon = Icons.Filled.Description,
-                    title = "Barruu Dubbisi",
-                    subtitle = "Asxaa, qoricha fi barruulee dubbisi",
-                    contentDescription = "Barruu dubbisi. Asxaa fi barruulee dubbisuuf tuqi",
-                    testTag = "card_read_text_om",
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onReadTextClick()
+                    AyneActionCard(
+                        icon = Icons.Filled.Description,
+                        title = "Barruu Dubbisi",
+                        subtitle = "Asxaa, qoricha fi barruulee dubbisi",
+                        contentDescription = "Barruu dubbisi. Asxaa fi barruulee dubbisuuf tuqi",
+                        testTag = "card_read_text_om",
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onReadTextClick()
+                        }
+                    )
+
+                    val askSubtitle = when {
+                        uiState.isRecordingVoice -> "Waraabaa jira… Xumuruuf tuqi"
+                        uiState.activeSessionId != null -> "Gaaffii dabalataa gaafadhu"
+                        uiState.lockedImageBase64 != null -> "Gaaffii dabalataa gaafadhu"
+                        else -> "Hiriyyaa AI · Qoosaa, oduu fi waan barbaadde hunda"
                     }
-                )
 
-                val askSubtitle = when {
-                    uiState.isRecordingVoice -> "Waraabaa jira… Xumuruuf tuqi"
-                    uiState.activeSessionId != null -> "Gaaffii dabalataa gaafadhu (Suuraa qabame)"
-                    uiState.lockedImageBase64 != null -> "Gaaffii dabalataa gaafadhu"
-                    else -> "Suuraa irratti gaafadhu (Dura suuraa kaasi)"
+                    AyneActionCard(
+                        icon = Icons.Filled.Mic,
+                        title = "Gaaffii Gaafadhu",
+                        subtitle = askSubtitle,
+                        contentDescription = "Gaaffii gaafadhu. Hiriyyaa AI tuqi",
+                        testTag = "card_ask_question_om",
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onAskQuestionClick()
+                        }
+                    )
                 }
-
-                AyneActionCard(
-                    icon = Icons.Filled.Mic,
-                    title = "Gaaffii Gaafadhu",
-                    subtitle = askSubtitle,
-                    contentDescription = "Gaaffii gaafadhu. Suuraa irratti gaafachuuf tuqi",
-                    testTag = "card_ask_question_om",
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onAskQuestionClick()
-                    }
-                )
             }
         }
 

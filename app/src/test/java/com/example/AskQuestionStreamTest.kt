@@ -69,9 +69,21 @@ class AskQuestionStreamTest {
     @Test
     fun testAskQuestionEndpointDerivation() {
         val state = AyneUiState()
+        assertNotNull(state.baseUrl)
+        assertTrue(state.baseUrl.contains("https://ayne-roan.vercel.app"))
         assertNotNull(state.askQuestionEndpoint)
         assertTrue(state.askQuestionEndpoint.contains("ask-question"))
+        assertTrue(state.apiEndpoint.contains("see-and-describe"))
+        assertTrue(state.readTextEndpoint.contains("read-text"))
         assertEquals("am-hamen", state.customVoice)
         assertNull(state.activeSessionId)
+    }
+
+    @Test
+    fun testBuildUrlsFromBaseUrl() {
+        val customBase = "https://my-custom-vision.app/"
+        assertEquals("https://my-custom-vision.app/api/see-and-describe", AyneUiState.buildVisionUrl(customBase))
+        assertEquals("https://my-custom-vision.app/api/read-text", AyneUiState.buildReadTextUrl(customBase))
+        assertEquals("https://my-custom-vision.app/api/ask-question", AyneUiState.buildAskQuestionUrl(customBase))
     }
 }
