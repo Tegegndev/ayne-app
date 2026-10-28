@@ -14,6 +14,18 @@ class VoiceRecorderHelper(private val context: Context) {
     val isRecording: Boolean
         get() = isCurrentlyRecording
 
+    /**
+     * Returns the maximum absolute amplitude sampled since the last call.
+     * Returns 0 if not currently recording or on error.
+     */
+    fun getMaxAmplitude(): Int {
+        return try {
+            if (isCurrentlyRecording) mediaRecorder?.maxAmplitude ?: 0 else 0
+        } catch (e: Exception) {
+            0
+        }
+    }
+
     fun startRecording(): Boolean {
         if (isCurrentlyRecording) return false
 

@@ -755,4 +755,61 @@ class VisionApiService(
             Result.failure(e)
         }
     }
+
+    /**
+     * Standalone Speech Synthesis (POST /api/tts/synthesize)
+     * Synthesizes plain text into spoken base64 MP3 audio using Addis AI neural voices.
+     */
+    suspend fun synthesizeTts(
+        baseUrl: String,
+        text: String,
+        customVoice: String = "am-hamen",
+        ttsProvider: String = "addis",
+        language: String = "am"
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val endpoint = "${baseUrl.trimEnd('/')}/api/tts/synthesize"
+            val jsonPayload = JSONObject().apply {
+                put("text", text)
+                put("voiceId", customVoice)
+                put("customVoice", customVoice)
+                put("language", language)
+                put("preferredLanguage", language)
+                put("provider", ttsProvider)
+                put("ttsProvider", ttsProvider)
+            }
+
+            val mediaType = "application/json; charset=utf-8".toMediaType()
+            val requestBody = jsonPayload.toString().toRequestBody(mediaType)
+            val request = Request.Builder()
+                .url(endpoint)
+                .post(requestBody)
+                .addHeader("Content-Type", "application/json")
+                .addHeader("Accept", "application/json")
+                .build()
+
+            val response = client.newCall(request).execute()
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful || body.isBlank()) {
+                return@withContext Result.failure(IOException("TTS HTTP ${response.code}: $body"))
+            }
+
+            val root = JSONObject(body)
+            val b64 = root.optString("audioBase64").ifEmpty {
+                val url = root.optString("audioUrl")
+                if (url.startsWith("data:audio") && url.contains(",")) {
+                    url.substringAfter(",")
+                } else {
+                    url
+                }
+            }
+            if (b64.isNotBlank()) {
+                Result.success(b64)
+            } else {
+                Result.failure(IOException("No audio payload returned from TTS"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
 }

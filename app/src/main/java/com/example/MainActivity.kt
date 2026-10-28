@@ -150,6 +150,14 @@ enum class SupportedLanguage(val displayName: String, val code: String) {
     ENGLISH("English", "en")
 }
 
+enum class VadState {
+    IDLE,
+    LISTENING,           // Listening for user voice (Hands-Free VAD active)
+    USER_SPEAKING,       // User voice detected (amplitude > threshold)
+    FREEZING_FRAME,      // 600ms silence detected, freezing CameraX frame & encoding mic audio
+    STREAMING_RESPONSE   // POST sent, receiving transcription / answer / audio_chunks
+}
+
 data class AyneUiState(
     val selectedLanguage: SupportedLanguage = SupportedLanguage.AMHARIC,
     val lastAnswer: String? = null,
@@ -171,7 +179,10 @@ data class AyneUiState(
     val conversationHistory: List<ConversationTurn> = emptyList(),
     val isRecordingVoice: Boolean = false,
     val isCompanionMode: Boolean = false,
-    val companionGreeting: String? = null
+    val companionGreeting: String? = null,
+    val vadState: VadState = VadState.IDLE,
+    val transcribedUserQuery: String? = null,
+    val isStreamingAudio: Boolean = false
 ) {
     companion object {
         fun buildVisionUrl(base: String): String =
@@ -313,6 +324,7 @@ class AyneViewModel(
     private var processingFeedbackHelper: ProcessingFeedbackHelper? = null
     private var voiceRecorderHelper: VoiceRecorderHelper? = null
     private var recordingJob: Job? = null
+    private var vadJob: Job? = null
     private var activeSessionId: String? = null
 
     private val _uiState = MutableStateFlow(AyneUiState())
@@ -346,7 +358,7 @@ class AyneViewModel(
     fun bargeIn() {
         audioPlaybackHelper.stop()
         processingFeedbackHelper?.stopWorkingFeedback()
-        if (_uiState.value.isRecordingVoice) {
+        if (_uiState.value.isRecordingVoice && _uiState.value.vadState == VadState.IDLE) {
             cancelVoiceRecording()
         }
     }
@@ -373,13 +385,214 @@ class AyneViewModel(
         }
         processingFeedbackHelper?.playSuccessTone()
         _userMessage.tryEmit(greeting)
+        speakGreeting(context, greeting)
+    }
+
+    private fun speakGreeting(context: Context, text: String) {
+        val state = _uiState.value
+        val voice = when (state.selectedLanguage) {
+            SupportedLanguage.ENGLISH -> "Zephyr"
+            SupportedLanguage.AFAN_OROMOO -> if (state.customVoice.startsWith("om-")) state.customVoice else "om-ayyaantuu"
+            SupportedLanguage.AMHARIC -> if (!state.customVoice.startsWith("om-")) state.customVoice else "am-hamen"
+        }
+        val langCode = state.selectedLanguage.code
+        val baseUrl = state.baseUrl
+
+        viewModelScope.launch {
+            val result = visionApiService.synthesizeTts(
+                baseUrl = baseUrl,
+                text = text,
+                customVoice = voice,
+                ttsProvider = "addis",
+                language = langCode
+            )
+            result.onSuccess { audioBase64 ->
+                _uiState.update { it.copy(lastAudioBase64 = audioBase64) }
+                audioPlaybackHelper.playBase64Audio(
+                    context = context,
+                    rawBase64Audio = audioBase64,
+                    onError = {
+                        processingFeedbackHelper?.playInstantTapEarcon()
+                    }
+                )
+            }.onFailure {
+                processingFeedbackHelper?.playInstantTapEarcon()
+            }
+        }
     }
 
     fun exitCompanionMode() {
+        vadJob?.cancel()
+        vadJob = null
         bargeIn()
-        _uiState.update { it.copy(isCompanionMode = false) }
+        _uiState.update {
+            it.copy(
+                isCompanionMode = false,
+                vadState = VadState.IDLE,
+                isRecordingVoice = false,
+                isStreamingAudio = false
+            )
+        }
         playTapEarcon()
         _userMessage.tryEmit("Switched to Vision mode")
+    }
+
+    /**
+     * Hands-Free Voice-Activated Visual Assistant (Auto-Snap + VAD)
+     * 1. Continuous Camera: CameraX is kept active in background.
+     * 2. VAD: Polls mic amplitude to detect speech start & 600ms silence.
+     * 3. Barge-In: Immediately stops playing audio as soon as speech is detected.
+     * 4. Auto-Snap: On 600ms silence, freezes CameraX frame, packages mic audio, and streams visual Q&A.
+     * 5. Silence Fallback: If 3s elapse with no speech, auto-snaps frame and sends query "ትዕይንቱን ግለጽልኝ".
+     */
+    fun startHandsFreeVad(
+        context: Context,
+        captureFrame: suspend () -> String
+    ) {
+        vadJob?.cancel()
+        recordingJob?.cancel()
+
+        if (voiceRecorderHelper == null) {
+            voiceRecorderHelper = VoiceRecorderHelper(context.applicationContext)
+        }
+
+        val started = voiceRecorderHelper?.startRecording() == true
+        if (!started) {
+            // Emulator or permission fallback
+            viewModelScope.launch {
+                val frame = try {
+                    captureFrame()
+                } catch (e: Exception) {
+                    CameraCaptureHelper.generateFallbackFrame()
+                }
+                val defaultQuery = when (_uiState.value.selectedLanguage) {
+                    SupportedLanguage.ENGLISH -> "Describe the scene"
+                    SupportedLanguage.AFAN_OROMOO -> "Waan naannoo jiru natti himi"
+                    SupportedLanguage.AMHARIC -> "ትዕይንቱን ግለጽልኝ"
+                }
+                executeStreamingVisualQa(
+                    context = context,
+                    frameBase64 = frame,
+                    voiceBase64 = null,
+                    textQuery = defaultQuery
+                )
+            }
+            return
+        }
+
+        _uiState.update {
+            it.copy(
+                vadState = VadState.LISTENING,
+                isRecordingVoice = true,
+                busyMessage = null
+            )
+        }
+
+        vadJob = viewModelScope.launch {
+            val startTime = System.currentTimeMillis()
+            var speechDetected = false
+            var lastSpeechTime = 0L
+            val speechThreshold = 2000
+            val silenceTimeoutMs = 600L
+            val noSpeechTimeoutMs = 3000L
+
+            while (isActive && _uiState.value.isCompanionMode) {
+                delay(60)
+                val amp = voiceRecorderHelper?.getMaxAmplitude() ?: 0
+
+                if (!speechDetected) {
+                    if (amp > speechThreshold) {
+                        speechDetected = true
+                        lastSpeechTime = System.currentTimeMillis()
+                        // When user starts speaking: Immediately mute/stop any active audio playing (Barge-In)
+                        bargeIn()
+                        _uiState.update { it.copy(vadState = VadState.USER_SPEAKING) }
+                    } else {
+                        // Silence Fallback: If no speech detected after 3s, send query: "ትዕይንቱን ግለጽልኝ"
+                        if (System.currentTimeMillis() - startTime >= noSpeechTimeoutMs) {
+                            handleSilenceFallback(context, captureFrame)
+                            return@launch
+                        }
+                    }
+                } else {
+                    // Speech was detected
+                    if (amp > speechThreshold) {
+                        lastSpeechTime = System.currentTimeMillis()
+                    } else {
+                        // Silence detected for 600ms after speech: freeze and send
+                        if (System.currentTimeMillis() - lastSpeechTime >= silenceTimeoutMs) {
+                            handleSpeechFinalized(context, captureFrame)
+                            return@launch
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fun forceFinalizeVad(
+        context: Context,
+        captureFrame: suspend () -> String
+    ) {
+        val currentVad = _uiState.value.vadState
+        vadJob?.cancel()
+        vadJob = null
+
+        if (currentVad == VadState.USER_SPEAKING) {
+            viewModelScope.launch {
+                handleSpeechFinalized(context, captureFrame)
+            }
+        } else if (currentVad == VadState.LISTENING) {
+            viewModelScope.launch {
+                handleSilenceFallback(context, captureFrame)
+            }
+        } else {
+            startHandsFreeVad(context, captureFrame)
+        }
+    }
+
+    private suspend fun handleSpeechFinalized(
+        context: Context,
+        captureFrame: suspend () -> String
+    ) {
+        _uiState.update { it.copy(vadState = VadState.FREEZING_FRAME, isRecordingVoice = false) }
+        val voiceBase64 = voiceRecorderHelper?.stopRecording()
+        val currentFrameBase64 = try {
+            captureFrame()
+        } catch (e: Exception) {
+            CameraCaptureHelper.generateFallbackFrame()
+        }
+        executeStreamingVisualQa(
+            context = context,
+            frameBase64 = currentFrameBase64,
+            voiceBase64 = voiceBase64,
+            textQuery = null
+        )
+    }
+
+    private suspend fun handleSilenceFallback(
+        context: Context,
+        captureFrame: suspend () -> String
+    ) {
+        _uiState.update { it.copy(vadState = VadState.FREEZING_FRAME, isRecordingVoice = false) }
+        voiceRecorderHelper?.stopRecording()
+        val currentFrameBase64 = try {
+            captureFrame()
+        } catch (e: Exception) {
+            CameraCaptureHelper.generateFallbackFrame()
+        }
+        val fallbackQuery = when (_uiState.value.selectedLanguage) {
+            SupportedLanguage.ENGLISH -> "Describe the scene"
+            SupportedLanguage.AFAN_OROMOO -> "Waan naannoo jiru natti himi"
+            SupportedLanguage.AMHARIC -> "ትዕይንቱን ግለጽልኝ"
+        }
+        _uiState.update { it.copy(transcribedUserQuery = fallbackQuery) }
+        executeStreamingVisualQa(
+            context = context,
+            frameBase64 = currentFrameBase64,
+            voiceBase64 = null,
+            textQuery = fallbackQuery
+        )
     }
 
     fun startVoiceRecording(context: Context) {
@@ -397,13 +610,12 @@ class AyneViewModel(
 
             recordingJob?.cancel()
             recordingJob = viewModelScope.launch {
-                delay(8000) // auto-stop after 8 seconds if user doesn't tap again
+                delay(8000)
                 if (_uiState.value.isRecordingVoice) {
                     stopAndSubmitVoiceRecording(context)
                 }
             }
         } else {
-            // Simulator or recording init fallback
             val query = when (_uiState.value.selectedLanguage) {
                 SupportedLanguage.ENGLISH -> "Tell me a joke"
                 SupportedLanguage.AFAN_OROMOO -> "Qoosaa natti himi"
@@ -442,8 +654,10 @@ class AyneViewModel(
     fun cancelVoiceRecording() {
         recordingJob?.cancel()
         recordingJob = null
+        vadJob?.cancel()
+        vadJob = null
         voiceRecorderHelper?.cancelRecording()
-        _uiState.update { it.copy(isRecordingVoice = false) }
+        _uiState.update { it.copy(isRecordingVoice = false, vadState = VadState.IDLE) }
     }
 
     fun onAction(context: Context, action: AyneAction) {
@@ -784,11 +998,12 @@ class AyneViewModel(
     fun executeFollowUpRequest(
         context: Context,
         voiceBase64: String?,
-        textQuery: String?
+        textQuery: String?,
+        frameBase64: String? = null
     ) {
         val state = _uiState.value
         val sid = activeSessionId ?: state.activeSessionId
-        val lockedImage = state.lockedImageBase64
+        val effectiveImage = frameBase64 ?: (if (sid == null) state.lockedImageBase64 else null)
 
         // Check for session reset command (e.g. "አዲስ ጀምር" / "start over")
         val isResetCommand = textQuery?.contains("አዲስ ጀምር") == true ||
@@ -803,12 +1018,16 @@ class AyneViewModel(
 
         if (state.isBusy) return
 
-        val progressMsg = context.getString(R.string.analyzing_followup)
+        val progressMsg = if (textQuery != null) "ጥያቄ፡ \"$textQuery\"" else context.getString(R.string.analyzing_followup)
         _uiState.update {
             it.copy(
                 isBusy = true,
+                vadState = VadState.STREAMING_RESPONSE,
                 busyMessage = progressMsg,
-                lastReadResponse = null
+                lastReadResponse = null,
+                transcribedUserQuery = textQuery ?: it.transcribedUserQuery,
+                lockedImageBase64 = effectiveImage ?: it.lockedImageBase64,
+                lastCapturedBase64 = effectiveImage ?: it.lastCapturedBase64
             )
         }
         processingFeedbackHelper?.startWorkingFeedback(viewModelScope)
@@ -840,7 +1059,7 @@ class AyneViewModel(
                 sessionId = sendSessionId,
                 audioBase64 = voiceBase64,
                 query = textQuery,
-                imageBase64 = if (sendSessionId == null) lockedImage else null,
+                imageBase64 = effectiveImage,
                 customVoice = voice,
                 ttsProvider = "addis",
                 preferredLanguage = prefLang,
@@ -854,7 +1073,13 @@ class AyneViewModel(
                             "om" -> "Gaaffii: \"$queryText\""
                             else -> "ጥያቄ፡ \"$queryText\""
                         }
-                        _uiState.update { it.copy(busyMessage = transMsg) }
+                        _uiState.update {
+                            it.copy(
+                                busyMessage = transMsg,
+                                transcribedUserQuery = queryText,
+                                vadState = VadState.STREAMING_RESPONSE
+                            )
+                        }
                         _userMessage.tryEmit(transMsg)
                     }
                 },
@@ -884,7 +1109,9 @@ class AyneViewModel(
                             lastEnglishAnswer = ansEv.english,
                             lastReadResponse = null,
                             conversationHistory = updatedHistory,
-                            busyMessage = null
+                            busyMessage = null,
+                            isStreamingAudio = true,
+                            vadState = VadState.STREAMING_RESPONSE
                         )
                     }
                 },
@@ -910,7 +1137,9 @@ class AyneViewModel(
                                 activeSessionId = null,
                                 lockedImageBase64 = null,
                                 isBusy = false,
-                                busyMessage = null
+                                busyMessage = null,
+                                vadState = VadState.IDLE,
+                                isStreamingAudio = false
                             )
                         }
                         val prompt = if (state.selectedLanguage == SupportedLanguage.AFAN_OROMOO) {
@@ -923,7 +1152,9 @@ class AyneViewModel(
                         _uiState.update {
                             it.copy(
                                 isBusy = false,
-                                busyMessage = null
+                                busyMessage = null,
+                                vadState = VadState.IDLE,
+                                isStreamingAudio = false
                             )
                         }
                         val prompt = if (state.selectedLanguage == SupportedLanguage.AFAN_OROMOO) {
@@ -938,7 +1169,9 @@ class AyneViewModel(
                         _uiState.update {
                             it.copy(
                                 isBusy = false,
-                                busyMessage = null
+                                busyMessage = null,
+                                vadState = VadState.IDLE,
+                                isStreamingAudio = false
                             )
                         }
                         _userMessage.tryEmit("Error ($code): $message")
@@ -948,7 +1181,9 @@ class AyneViewModel(
                     _uiState.update {
                         it.copy(
                             isBusy = false,
-                            busyMessage = null
+                            busyMessage = null,
+                            vadState = VadState.IDLE,
+                            isStreamingAudio = false
                         )
                     }
                     val fullAudio = audioChunks.toString()
@@ -1303,6 +1538,8 @@ class AyneViewModel(
 
     override fun onCleared() {
         super.onCleared()
+        vadJob?.cancel()
+        recordingJob?.cancel()
         processingFeedbackHelper?.release()
         audioPlaybackHelper.stop()
     }
@@ -1580,20 +1817,38 @@ fun AyneAppScreen(
 
     fun triggerVolumeFollowUp() {
         viewModel.bargeIn()
-        if (uiState.isRecordingVoice) {
-            viewModel.stopAndSubmitVoiceRecording(context)
+        if (uiState.vadState == VadState.LISTENING || uiState.vadState == VadState.USER_SPEAKING || uiState.isRecordingVoice) {
+            viewModel.forceFinalizeVad(context) {
+                CameraCaptureHelper.captureFrame(context, imageCapture)
+            }
         } else {
             if (!uiState.isCompanionMode) {
                 viewModel.onAction(context, AyneAction.EnterCompanionMode)
             } else {
                 requireMicPermission {
-                    viewModel.startVoiceRecording(context)
+                    viewModel.startHandsFreeVad(context) {
+                        CameraCaptureHelper.captureFrame(context, imageCapture)
+                    }
                 }
             }
         }
     }
 
-    LaunchedEffect(onRegisterVolumeHandlers, uiState.isRecordingVoice, uiState.lockedImageBase64, uiState.activeSessionId, uiState.isCompanionMode) {
+    LaunchedEffect(uiState.isCompanionMode) {
+        if (uiState.isCompanionMode) {
+            val hasMic = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.RECORD_AUDIO
+            ) == PackageManager.PERMISSION_GRANTED
+            if (hasMic) {
+                viewModel.startHandsFreeVad(context) {
+                    CameraCaptureHelper.captureFrame(context, imageCapture)
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(onRegisterVolumeHandlers, uiState.isRecordingVoice, uiState.lockedImageBase64, uiState.activeSessionId, uiState.isCompanionMode, uiState.vadState) {
         onRegisterVolumeHandlers?.invoke(
             { triggerDescribeSurroundings() },
             { triggerVolumeFollowUp() }
@@ -2041,7 +2296,7 @@ fun AyneScreenContent(
                     }
                 }
             }
-        } else if (!uiState.lastAnswer.isNullOrBlank() && !uiState.isBusy) {
+        } else if (!uiState.lastAnswer.isNullOrBlank() && !uiState.isBusy && !uiState.isCompanionMode) {
             // General description answer card with dismiss button and bounded height
             Surface(
                 modifier = Modifier
@@ -2417,7 +2672,7 @@ fun AyneScreenContent(
 }
 
 // ==========================================
-// AI Companion Panel Component
+// Voice-First AI Companion Panel Component
 // ==========================================
 
 @Composable
@@ -2428,15 +2683,16 @@ fun AyneCompanionPanel(
     modifier: Modifier = Modifier
 ) {
     val haptic = LocalHapticFeedback.current
-    var typedQuestion by remember { mutableStateOf("") }
+    val isRecording = uiState.isRecordingVoice
+    val displaySpeech = uiState.lastAnswer ?: uiState.companionGreeting
 
     Column(
         modifier = modifier
             .fillMaxWidth()
             .testTag("companion_mode_container"),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 1. Companion Header Card
+        // 1. Top Navigation & Voice Header
         Surface(
             shape = RoundedCornerShape(16.dp),
             color = AyneDarkCard,
@@ -2456,7 +2712,7 @@ fun AyneCompanionPanel(
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(42.dp)
+                            .size(44.dp)
                             .clip(CircleShape)
                             .background(AyneVibrantYellow),
                         contentAlignment = Alignment.Center
@@ -2465,16 +2721,16 @@ fun AyneCompanionPanel(
                             imageVector = Icons.Filled.Mic,
                             contentDescription = null,
                             tint = AyneOnYellow,
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier.size(26.dp)
                         )
                     }
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
                         Text(
                             text = when (uiState.selectedLanguage) {
-                                SupportedLanguage.ENGLISH -> "AI Companion"
-                                SupportedLanguage.AFAN_OROMOO -> "Hiriyyaa AI"
-                                SupportedLanguage.AMHARIC -> "አጋዥ ረዳት (AI Companion)"
+                                SupportedLanguage.ENGLISH -> "Voice Assistant"
+                                SupportedLanguage.AFAN_OROMOO -> "Gargaaraa Sagalee"
+                                SupportedLanguage.AMHARIC -> "የድምፅ ረዳት"
                             },
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
@@ -2482,9 +2738,9 @@ fun AyneCompanionPanel(
                         )
                         Text(
                             text = when (uiState.selectedLanguage) {
-                                SupportedLanguage.ENGLISH -> "Chat about jokes, news, facts & more"
-                                SupportedLanguage.AFAN_OROMOO -> "Qoosaa, oduu fi waan barbaadde hunda"
-                                SupportedLanguage.AMHARIC -> "ስለ ቀልድ፣ ዜና እና ማንኛውም ርዕስ ያውሩ"
+                                SupportedLanguage.ENGLISH -> "100% Voice-First • Eyes-Free"
+                                SupportedLanguage.AFAN_OROMOO -> "Sagalee Qofaan • Ijaan Ala"
+                                SupportedLanguage.AMHARIC -> "ሙሉ በሙሉ በድምፅ • ያለ እይታ"
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = AynePureWhite.copy(alpha = 0.85f)
@@ -2509,297 +2765,208 @@ fun AyneCompanionPanel(
                         tint = AynePureWhite,
                         modifier = Modifier.size(16.dp)
                     )
-                    Spacer(modifier = Modifier.width(4.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = when (uiState.selectedLanguage) {
                             SupportedLanguage.ENGLISH -> "Camera"
                             SupportedLanguage.AFAN_OROMOO -> "Kaameraa"
                             SupportedLanguage.AMHARIC -> "ካሜራ"
                         },
-                        fontSize = 12.sp,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
             }
         }
 
-        // 2. AI Greeting / Active Response Speech Card
-        val displaySpeech = uiState.lastAnswer ?: uiState.companionGreeting
+        // 2. Spoken Speech & Dialogue Card (High Contrast)
         if (!displaySpeech.isNullOrBlank()) {
             Surface(
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(16.dp),
                 color = AynePureBlack,
-                border = BorderStroke(1.5.dp, AyneVibrantYellow),
+                border = BorderStroke(2.dp, AyneVibrantYellow),
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("companion_greeting_card")
                     .semantics {
-                        contentDescription = "Companion says: $displaySpeech"
+                        contentDescription = "Spoken response: $displaySpeech"
                     }
             ) {
-                Column(modifier = Modifier.padding(14.dp)) {
+                Column(modifier = Modifier.padding(16.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = when (uiState.selectedLanguage) {
-                                SupportedLanguage.ENGLISH -> "AI Companion"
-                                SupportedLanguage.AFAN_OROMOO -> "Hiriyyaa AI"
-                                SupportedLanguage.AMHARIC -> "የረዳትዎ ድምፅ"
-                            },
-                            color = AyneVibrantYellow,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+                                contentDescription = null,
+                                tint = AyneVibrantYellow,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = when (uiState.selectedLanguage) {
+                                    SupportedLanguage.ENGLISH -> "Assistant Spoken Voice"
+                                    SupportedLanguage.AFAN_OROMOO -> "Sagalee Gargaaraa"
+                                    SupportedLanguage.AMHARIC -> "የረዳቱ ንግግር"
+                                },
+                                color = AyneVibrantYellow,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
 
                         IconButton(
                             onClick = {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 onAction(AyneAction.RepeatLastAnswer)
                             },
-                            modifier = Modifier.size(36.dp)
+                            modifier = Modifier.size(40.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.VolumeUp,
                                 contentDescription = "Repeat spoken answer",
                                 tint = AyneVibrantYellow,
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(24.dp)
                             )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
 
                     Text(
                         text = displaySpeech,
                         color = AynePureWhite,
-                        fontSize = 16.sp,
-                        lineHeight = 22.sp,
+                        fontSize = 17.sp,
+                        lineHeight = 24.sp,
                         fontWeight = FontWeight.SemiBold
                     )
                 }
             }
         }
 
-        // 3. Quick Topic Suggestion Chips
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Text(
-                text = when (uiState.selectedLanguage) {
-                    SupportedLanguage.ENGLISH -> "Suggested topics (Tap to ask):"
-                    SupportedLanguage.AFAN_OROMOO -> "Mata duree filataman (Tuquun gaafadhu):"
-                    SupportedLanguage.AMHARIC -> "የተመረጡ ርዕሶች (ለመጠየቅ ይጫኑ)፦"
-                },
-                color = AyneVibrantYellow,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 6.dp)
-            )
-
-            val chips = when (uiState.selectedLanguage) {
-                SupportedLanguage.ENGLISH -> listOf(
-                    "🎭 Tell me a joke" to "Tell me a funny joke",
-                    "💡 Fun fact" to "Tell me an interesting fun fact",
-                    "📰 Latest news" to "What is the latest news and updates?",
-                    "☀️ Daily advice" to "Give me positive advice for today"
-                )
-                SupportedLanguage.AFAN_OROMOO -> listOf(
-                    "🎭 Qoosaa natti himi" to "Qoosaa nama kofalchiisu natti himi",
-                    "💡 Waan nama ajaa'ibu" to "Waan nama ajaa'ibu tokko natti himi",
-                    "📰 Oduu har'aa" to "Oduu fi haala har'aa natti himi",
-                    "☀️ Gorsa guyyaa" to "Gorsa gaarii guyyaa har'aa naaf kenni"
-                )
-                SupportedLanguage.AMHARIC -> listOf(
-                    "🎭 አስቂኝ ቀልድ ንገረኝ" to "አስቂኝ ቀልድ ንገረኝ",
-                    "💡 አስደናቂ እውነታ" to "አስደናቂ እውነታ ንገረኝ",
-                    "📰 የዛሬ ዜና" to "የዛሬ ዜና እና መረጃ ምንድነው?",
-                    "☀️ የዕለቱ ምክር" to "የዕለቱ ምክር እና ብርታት ስጠኝ"
-                )
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                chips.take(2).forEach { (label, query) ->
-                    Button(
-                        onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onAction(AyneAction.AskCompanionQuestion(query))
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = AyneDarkCard,
-                            contentColor = AyneVibrantYellow
-                        ),
-                        border = BorderStroke(1.dp, AyneVibrantYellow.copy(alpha = 0.6f)),
-                        shape = RoundedCornerShape(20.dp),
-                        modifier = Modifier
-                            .weight(1f)
-                            .heightIn(min = 48.dp)
-                    ) {
-                        Text(
-                            text = label,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                chips.drop(2).take(2).forEach { (label, query) ->
-                    Button(
-                        onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onAction(AyneAction.AskCompanionQuestion(query))
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = AyneDarkCard,
-                            contentColor = AyneVibrantYellow
-                        ),
-                        border = BorderStroke(1.dp, AyneVibrantYellow.copy(alpha = 0.6f)),
-                        shape = RoundedCornerShape(20.dp),
-                        modifier = Modifier
-                            .weight(1f)
-                            .heightIn(min = 48.dp)
-                    ) {
-                        Text(
-                            text = label,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1
-                        )
-                    }
-                }
-            }
-        }
-
-        // 4. Large Accessible Microphone Button
-        val isRecording = uiState.isRecordingVoice
-        Button(
-            onClick = {
-                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                onSpeakClick()
-            },
-            colors = ButtonDefaults.buttonColors(
-                containerColor = if (isRecording) AynePureWhite else AyneVibrantYellow,
-                contentColor = AyneOnYellow
-            ),
-            shape = RoundedCornerShape(16.dp),
+        // 3. Giant Tactile Voice Interaction Button (Touch & Eyes-free)
+        Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 58.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .clickable {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onSpeakClick()
+                }
+                .border(
+                    width = if (isRecording) 3.dp else 2.dp,
+                    color = if (isRecording) AynePureWhite else AyneVibrantYellow,
+                    shape = RoundedCornerShape(20.dp)
+                )
                 .testTag("companion_mic_button")
                 .semantics {
                     role = Role.Button
                     contentDescription = if (isRecording) {
-                        "Recording voice question. Tap to submit or press Volume minus."
+                        "Microphone active. Listening to your voice. Tap to finish and get answer."
                     } else {
-                        "Tap to speak your question or press Volume minus."
+                        "Tap to speak your question with your voice, or press Volume minus."
                     }
-                }
+                },
+            color = if (isRecording) AynePureWhite else AyneVibrantYellow,
+            shape = RoundedCornerShape(20.dp)
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 24.dp, horizontal = 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
             ) {
-                Icon(
-                    imageVector = Icons.Filled.Mic,
-                    contentDescription = null,
-                    tint = if (isRecording) AynePureBlack else AyneOnYellow,
-                    modifier = Modifier.size(24.dp)
-                )
-                Spacer(modifier = Modifier.width(10.dp))
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(CircleShape)
+                        .background(if (isRecording) AynePureBlack else AyneOnYellow),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Mic,
+                        contentDescription = null,
+                        tint = if (isRecording) AyneVibrantYellow else AynePureBlack,
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
                 Text(
                     text = if (isRecording) {
                         when (uiState.selectedLanguage) {
-                            SupportedLanguage.ENGLISH -> "Listening… Tap to Submit"
-                            SupportedLanguage.AFAN_OROMOO -> "Dhaga'aa jira… Xumuruuf tuqi"
+                            SupportedLanguage.ENGLISH -> "Listening… Tap to Finish"
+                            SupportedLanguage.AFAN_OROMOO -> "Dhaggeeffachaa jira… Xumuruuf Tuqi"
                             SupportedLanguage.AMHARIC -> "እያዳመጥኩ ነው… ለመጨረስ ይጫኑ"
                         }
                     } else {
                         when (uiState.selectedLanguage) {
-                            SupportedLanguage.ENGLISH -> "Tap to Speak (or Volume−)"
-                            SupportedLanguage.AFAN_OROMOO -> "Dubbachuuf tuqi (Volume−)"
-                            SupportedLanguage.AMHARIC -> "ለመናገር ይጫኑ (ወይም Volume−)"
+                            SupportedLanguage.ENGLISH -> "Tap to Speak (or Press Volume ▼)"
+                            SupportedLanguage.AFAN_OROMOO -> "Dubbachuuf Tuqi (Volume ▼)"
+                            SupportedLanguage.AMHARIC -> "ለመናገር ይጫኑ (ወይም Volume ▼)"
                         }
                     },
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 18.sp,
                     color = if (isRecording) AynePureBlack else AyneOnYellow
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Text(
+                    text = if (isRecording) {
+                        when (uiState.selectedLanguage) {
+                            SupportedLanguage.ENGLISH -> "Speak naturally, asking about anything"
+                            SupportedLanguage.AFAN_OROMOO -> "Waan feete hunda bilisaan gaafadhu"
+                            SupportedLanguage.AMHARIC -> "ስለማንኛውም ነገር በነፃነት ይናገሩ"
+                        }
+                    } else {
+                        when (uiState.selectedLanguage) {
+                            SupportedLanguage.ENGLISH -> "Sub-second speech response • No typing needed"
+                            SupportedLanguage.AFAN_OROMOO -> "Deebii sagalee ariifataa • Barreeffama hin barbaadu"
+                            SupportedLanguage.AMHARIC -> "ፈጣን የድምፅ ምላሽ • ጽሕፈት አያስፈልግም"
+                        }
+                    },
+                    fontSize = 13.sp,
+                    color = if (isRecording) AynePureBlack.copy(alpha = 0.8f) else AyneOnYellow.copy(alpha = 0.85f),
+                    fontWeight = FontWeight.Medium
                 )
             }
         }
 
-        // 5. Accessible Text Input for Typing Questions
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
+        // 4. Physical Volume Key Tactile Hints
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = AyneDarkCard,
+            border = BorderStroke(1.dp, AyneVibrantYellow.copy(alpha = 0.4f)),
+            modifier = Modifier.fillMaxWidth()
         ) {
-            OutlinedTextField(
-                value = typedQuestion,
-                onValueChange = { typedQuestion = it },
-                placeholder = {
-                    Text(
-                        text = when (uiState.selectedLanguage) {
-                            SupportedLanguage.ENGLISH -> "Type question or topic…"
-                            SupportedLanguage.AFAN_OROMOO -> "Gaaffii kee barreessi…"
-                            SupportedLanguage.AMHARIC -> "ጥያቄ ወይም ርዕስ እዚህ ይፃፉ…"
-                        },
-                        color = AynePureWhite.copy(alpha = 0.5f),
-                        fontSize = 13.sp
-                    )
-                },
-                singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = AyneVibrantYellow,
-                    unfocusedBorderColor = AynePureWhite.copy(alpha = 0.6f),
-                    focusedTextColor = AynePureWhite,
-                    unfocusedTextColor = AynePureWhite,
-                    cursorColor = AyneVibrantYellow
-                ),
-                keyboardOptions = KeyboardOptions(
-                    imeAction = ImeAction.Send
-                ),
-                modifier = Modifier
-                    .weight(1f)
-                    .testTag("companion_text_input")
-            )
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            Button(
-                onClick = {
-                    val trimmed = typedQuestion.trim()
-                    if (trimmed.isNotBlank()) {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onAction(AyneAction.AskCompanionQuestion(trimmed))
-                        typedQuestion = ""
-                    }
-                },
-                enabled = typedQuestion.isNotBlank(),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = AyneVibrantYellow,
-                    contentColor = AyneOnYellow,
-                    disabledContainerColor = AyneDarkCard,
-                    disabledContentColor = AynePureWhite.copy(alpha = 0.4f)
-                ),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier
-                    .size(52.dp)
-                    .testTag("companion_send_button")
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.Send,
-                    contentDescription = stringResource(R.string.companion_send_button),
-                    modifier = Modifier.size(20.dp)
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text(
+                    text = when (uiState.selectedLanguage) {
+                        SupportedLanguage.ENGLISH -> "Eyes-Free Hardware Shortcuts:"
+                        SupportedLanguage.AFAN_OROMOO -> "Qabduuwwan Sagalee Meeshaa:"
+                        SupportedLanguage.AMHARIC -> "የስልኩ የድምፅ ቁልፎች መቆጣጠሪያ፦"
+                    },
+                    color = AyneVibrantYellow,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = when (uiState.selectedLanguage) {
+                        SupportedLanguage.ENGLISH -> "• Volume ▼ (Single Click): Speak question\n• Volume ▼ (Double Tap): Replay last spoken speech\n• Screen Tap: Barge-in and stop speech"
+                        SupportedLanguage.AFAN_OROMOO -> "• Volume ▼ (Si'a tokko): Gaaffii dubbadhu\n• Volume ▼ (Si'a lama tuqi): Sagalee darbe deebisii dhaggeeffadhu\n• Iskiriinii tuqi: Sagalee dhaabi"
+                        SupportedLanguage.AMHARIC -> "• Volume ▼ (አንዴ መጫን)፦ ጥያቄዎን በድምፅ ለመጠየቅ\n• Volume ▼ (ሁለት ጊዜ በፍጥነት መጫን)፦ ያለፈውን ንግግር ለመድገም\n• ስክሪኑን መንካት፦ ንግግሩን ወዲያውኑ ለማቋረጥ"
+                    },
+                    color = AynePureWhite.copy(alpha = 0.85f),
+                    fontSize = 12.sp,
+                    lineHeight = 18.sp
                 )
             }
         }

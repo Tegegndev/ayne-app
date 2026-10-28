@@ -269,7 +269,7 @@ fun EnglishMockScreen(
                         }
                     }
                 }
-            } else if (!uiState.lastAnswer.isNullOrBlank() && !uiState.isBusy) {
+            } else if (!uiState.lastAnswer.isNullOrBlank() && !uiState.isBusy && !uiState.isCompanionMode) {
                 // 5. Visual Description Result Card
                 val displayAnswer = uiState.lastEnglishAnswer?.takeIf { it.isNotBlank() } ?: uiState.lastAnswer ?: ""
                 val secondaryAmharic = if (uiState.lastEnglishAnswer?.isNotBlank() == true) uiState.lastAnswer else null
@@ -670,7 +670,7 @@ fun AfaanOromooMockScreen(
                         }
                     }
                 }
-            } else if (!uiState.lastAnswer.isNullOrBlank() && !uiState.isBusy) {
+            } else if (!uiState.lastAnswer.isNullOrBlank() && !uiState.isBusy && !uiState.isCompanionMode) {
                 // 5. Visual Description Result Card
                 Surface(
                     modifier = Modifier
