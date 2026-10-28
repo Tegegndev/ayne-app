@@ -1132,10 +1132,10 @@ class AyneViewModel(
                         if (!response.sessionId.isNullOrBlank()) {
                             activeSessionId = response.sessionId
                         }
-                        val chosenAnswer = if (state.selectedLanguage == SupportedLanguage.ENGLISH && response.english.isNotBlank()) {
-                            response.english
-                        } else {
-                            response.amharic.ifBlank { response.english }
+                        val chosenAnswer = when (state.selectedLanguage) {
+                            SupportedLanguage.ENGLISH -> response.english.ifBlank { response.amharic }
+                            SupportedLanguage.AFAN_OROMOO -> response.oromo.ifBlank { response.amharic.ifBlank { response.english } }
+                            SupportedLanguage.AMHARIC -> response.amharic.ifBlank { response.english }
                         }.cleanLabelPrefix()
 
                         val userTurn = response.transcribedQuery?.takeIf { it.isNotBlank() } ?: currentTranscribedQuery ?: "Voice question"
