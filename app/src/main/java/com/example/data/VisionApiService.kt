@@ -467,4 +467,252 @@ class VisionApiService(
             Result.failure(e)
         }
     }
+
+    /**
+     * Dedicated Real-Time Visual Q&A Stream (SSE)
+     * POST /api/ask-question/stream
+     * Events:
+     * 1. event: transcription -> user's transcribed Amharic/English voice query (~300ms)
+     * 2. event: answer -> Gemini visual reasoning answer (~700ms)
+     * 3. event: audio_chunk -> streaming Addis AI MP3 chunks (~1.0s – 1.2s for first chunk)
+     * 4. event: done -> turn count, total latency (~1.8s)
+     * 5. event: error -> error code and message (e.g. SESSION_EXPIRED, INADMISSIBLE_AUDIO)
+     */
+    suspend fun askQuestionStream(
+        baseEndpointUrl: String,
+        sessionId: String?,
+        audioBase64: String? = null,
+        query: String? = null,
+        imageBase64: String? = null,
+        customVoice: String = "am-hamen",
+        ttsProvider: String = "addis",
+        preferredLanguage: String = "am",
+        includeAudio: Boolean = true,
+        onTranscription: (AskQuestionTranscriptionEvent) -> Unit,
+        onAnswer: (AskQuestionAnswerEvent) -> Unit,
+        onAudioChunk: (StreamAudioChunkEvent) -> Unit,
+        onErrorEvent: (code: String, message: String) -> Unit,
+        onDone: () -> Unit
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val streamUrl = if (baseEndpointUrl.endsWith("/stream")) {
+                baseEndpointUrl
+            } else if (baseEndpointUrl.endsWith("/ask-question")) {
+                "$baseEndpointUrl/stream"
+            } else if (baseEndpointUrl.endsWith("/see-and-describe")) {
+                baseEndpointUrl.replace("see-and-describe", "ask-question") + "/stream"
+            } else {
+                "${baseEndpointUrl.trimEnd('/')}/api/ask-question/stream"
+            }
+
+            val jsonPayload = JSONObject().apply {
+                if (!sessionId.isNullOrBlank()) {
+                    put("sessionId", sessionId)
+                }
+                if (!audioBase64.isNullOrBlank()) {
+                    put("audioBase64", audioBase64)
+                }
+                if (!query.isNullOrBlank()) {
+                    put("query", query)
+                }
+                if (!imageBase64.isNullOrBlank()) {
+                    put("imageBase64", imageBase64)
+                }
+                put("customVoice", customVoice)
+                put("ttsProvider", ttsProvider)
+                put("preferredLanguage", preferredLanguage)
+                put("includeAudio", includeAudio)
+            }
+
+            val mediaType = "application/json; charset=utf-8".toMediaType()
+            val requestBody = jsonPayload.toString().toRequestBody(mediaType)
+
+            val request = Request.Builder()
+                .url(streamUrl)
+                .post(requestBody)
+                .addHeader("Accept", "text/event-stream")
+                .addHeader("Content-Type", "application/json")
+                .build()
+
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) {
+                val errBody = response.body?.string().orEmpty()
+                try {
+                    val errJson = JSONObject(errBody)
+                    val code = errJson.optString("code", "HTTP_${response.code}")
+                    val msg = errJson.optString("message", errBody)
+                    onErrorEvent(code, msg)
+                } catch (e: Exception) {
+                    if (response.code == 404) {
+                        onErrorEvent("SESSION_EXPIRED", "Session expired in server cache.")
+                    } else if (response.code == 422) {
+                        onErrorEvent("INADMISSIBLE_AUDIO", "ድምፅዎ አልተሰማም፤ እባክዎ እንደገና ይናገሩ")
+                    } else {
+                        onErrorEvent("HTTP_${response.code}", errBody.ifEmpty { "HTTP ${response.code}" })
+                    }
+                }
+                return@withContext Result.failure(IOException("AskQuestion stream HTTP ${response.code}"))
+            }
+
+            val inputStream = response.body?.byteStream()
+                ?: return@withContext Result.failure(IOException("Empty stream body"))
+
+            BufferedReader(InputStreamReader(inputStream, Charsets.UTF_8)).use { reader ->
+                var currentEvent: String? = null
+                var line: String?
+
+                while (reader.readLine().also { line = it } != null) {
+                    val currentLine = line?.trim() ?: continue
+                    if (currentLine.isEmpty()) continue
+
+                    if (currentLine.startsWith("event:")) {
+                        currentEvent = currentLine.removePrefix("event:").trim()
+                    } else if (currentLine.startsWith("data:")) {
+                        val dataStr = currentLine.removePrefix("data:").trim()
+                        if (dataStr == "[DONE]" || currentEvent == "done") {
+                            onDone()
+                            break
+                        }
+
+                        when (currentEvent) {
+                            "transcription" -> {
+                                try {
+                                    val ev = AskQuestionTranscriptionEvent.fromJson(dataStr)
+                                    onTranscription(ev)
+                                } catch (e: Exception) {
+                                    // Ignore parse error
+                                }
+                            }
+                            "answer" -> {
+                                try {
+                                    val ev = AskQuestionAnswerEvent.fromJson(dataStr)
+                                    onAnswer(ev)
+                                } catch (e: Exception) {
+                                    // Ignore parse error
+                                }
+                            }
+                            "audio_chunk" -> {
+                                try {
+                                    val obj = JSONObject(dataStr)
+                                    val chunk = obj.optString("chunk").ifEmpty {
+                                        obj.optString("chunkBase64").ifEmpty {
+                                            obj.optString("audioBase64")
+                                        }
+                                    }
+                                    val format = obj.optString("format", "mp3")
+                                    if (chunk.isNotEmpty()) {
+                                        onAudioChunk(StreamAudioChunkEvent(chunk, format))
+                                    }
+                                } catch (e: Exception) {
+                                    // Ignore
+                                }
+                            }
+                            "error" -> {
+                                try {
+                                    val obj = JSONObject(dataStr)
+                                    val code = obj.optString("code", "ERROR")
+                                    val msg = obj.optString("message", obj.optString("error", dataStr))
+                                    onErrorEvent(code, msg)
+                                } catch (e: Exception) {
+                                    onErrorEvent("ERROR", dataStr)
+                                }
+                            }
+                            else -> {
+                                try {
+                                    val obj = JSONObject(dataStr)
+                                    if (obj.has("transcribedQuery")) {
+                                        onTranscription(AskQuestionTranscriptionEvent.fromJson(dataStr))
+                                    } else if (obj.has("amharic") || obj.has("english")) {
+                                        onAnswer(AskQuestionAnswerEvent.fromJson(dataStr))
+                                    } else if (obj.has("chunk") || obj.has("chunkBase64")) {
+                                        val chunk = obj.optString("chunk", obj.optString("chunkBase64"))
+                                        val format = obj.optString("format", "mp3")
+                                        if (chunk.isNotEmpty()) {
+                                            onAudioChunk(StreamAudioChunkEvent(chunk, format))
+                                        }
+                                    }
+                                } catch (e: Exception) {
+                                    // Ignore
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            onDone()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Dedicated Buffered Fallback Visual Q&A (JSON)
+     * POST /api/ask-question
+     */
+    suspend fun askQuestion(
+        endpointUrl: String,
+        sessionId: String?,
+        audioBase64: String? = null,
+        query: String? = null,
+        imageBase64: String? = null,
+        customVoice: String = "am-hamen",
+        ttsProvider: String = "addis",
+        preferredLanguage: String = "am",
+        includeAudio: Boolean = true
+    ): Result<VisionDescribeResponse> = withContext(Dispatchers.IO) {
+        try {
+            val resolvedUrl = if (endpointUrl.endsWith("/stream")) {
+                endpointUrl.removeSuffix("/stream")
+            } else if (endpointUrl.endsWith("/ask-question")) {
+                endpointUrl
+            } else if (endpointUrl.endsWith("/see-and-describe")) {
+                endpointUrl.replace("see-and-describe", "ask-question")
+            } else {
+                "${endpointUrl.trimEnd('/')}/api/ask-question"
+            }
+
+            val jsonPayload = JSONObject().apply {
+                if (!sessionId.isNullOrBlank()) {
+                    put("sessionId", sessionId)
+                }
+                if (!audioBase64.isNullOrBlank()) {
+                    put("audioBase64", audioBase64)
+                }
+                if (!query.isNullOrBlank()) {
+                    put("query", query)
+                }
+                if (!imageBase64.isNullOrBlank()) {
+                    put("imageBase64", imageBase64)
+                }
+                put("customVoice", customVoice)
+                put("ttsProvider", ttsProvider)
+                put("preferredLanguage", preferredLanguage)
+                put("includeAudio", includeAudio)
+            }
+
+            val mediaType = "application/json; charset=utf-8".toMediaType()
+            val requestBody = jsonPayload.toString().toRequestBody(mediaType)
+
+            val request = Request.Builder()
+                .url(resolvedUrl)
+                .post(requestBody)
+                .addHeader("Content-Type", "application/json")
+                .addHeader("Accept", "application/json")
+                .build()
+
+            val response = client.newCall(request).execute()
+            val responseBody = response.body?.string()
+
+            if (!response.isSuccessful || responseBody.isNullOrBlank()) {
+                val errorMsg = "API returned HTTP ${response.code}: ${responseBody?.take(150) ?: "Empty response"}"
+                return@withContext Result.failure(IOException(errorMsg))
+            }
+
+            val parsed = VisionDescribeResponse.fromJson(responseBody)
+            Result.success(parsed)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
 }

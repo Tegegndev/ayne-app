@@ -58,10 +58,13 @@
     <string name="settings_dialog_subtitle">Endpoints configured from environment variables:</string>
     <string name="vision_endpoint_label">See &amp; Describe URL</string>
     <string name="read_text_endpoint_label">Read Text &amp; Signs URL</string>
+    <string name="ask_question_endpoint_label">Ask Question (Real-time Stream) URL</string>
     <string name="voice_selector_label">Voice Selection</string>
     <string name="save_button">Save</string>
     <string name="cancel_button">Cancel</string>
     <string name="reset_default">Reset Default</string>
+    <string name="session_expired_prompt">የተያዘው ምስል ጊዜው አልፏል፤ እባክዎ አዲስ ፎቶ ያንሱ</string>
+    <string name="inadmissible_audio_prompt">ድምፅዎ አልተሰማም፤ እባክዎ እንደገና ይናገሩ</string>
     
     <!-- Languages -->
     <string name="language_amharic">አማርኛ</string>

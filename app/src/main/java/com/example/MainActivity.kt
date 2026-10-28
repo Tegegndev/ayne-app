@@ -158,6 +158,7 @@ data class AyneUiState(
     val isFrontCamera: Boolean = false,
     val apiEndpoint: String = DEFAULT_ENDPOINT,
     val readTextEndpoint: String = DEFAULT_READ_TEXT_ENDPOINT,
+    val askQuestionEndpoint: String = DEFAULT_ASK_QUESTION_ENDPOINT,
     val customVoice: String = "am-hamen",
     val lastResponse: VisionDescribeResponse? = null,
     val lastReadResponse: ReadTextResponse? = null,
@@ -190,6 +191,21 @@ data class AyneUiState(
                 "https://foul-crematorium-pjp6vpw46q65h665r-3000.app.github.dev/api/read-text"
             }
         }
+
+        val DEFAULT_ASK_QUESTION_ENDPOINT: String by lazy {
+            try {
+                val vision = BuildConfig.VISION_API_URL
+                if (vision.contains("see-and-describe")) {
+                    vision.replace("see-and-describe", "ask-question")
+                } else if (vision.isNotBlank()) {
+                    "$vision/api/ask-question"
+                } else {
+                    "https://foul-crematorium-pjp6vpw46q65h665r-3000.app.github.dev/api/ask-question"
+                }
+            } catch (e: Throwable) {
+                "https://foul-crematorium-pjp6vpw46q65h665r-3000.app.github.dev/api/ask-question"
+            }
+        }
     }
 }
 
@@ -206,7 +222,7 @@ sealed interface AyneAction {
     data object RepeatLastAnswer : AyneAction
     data class SelectLanguage(val language: SupportedLanguage) : AyneAction
     data object FlipCamera : AyneAction
-    data class UpdateEndpoints(val visionUrl: String, val readTextUrl: String) : AyneAction
+    data class UpdateEndpoints(val visionUrl: String, val readTextUrl: String, val askQuestionUrl: String? = null) : AyneAction
     data class UpdateVoice(val voiceId: String) : AyneAction
     data object VolumeCaptureTriggered : AyneAction
     data object VolumeFollowUpTriggered : AyneAction
@@ -408,10 +424,12 @@ class AyneViewModel(
             is AyneAction.UpdateEndpoints -> {
                 val cleanedVision = action.visionUrl.trim()
                 val cleanedRead = action.readTextUrl.trim()
+                val cleanedAsk = action.askQuestionUrl?.trim().orEmpty()
                 _uiState.update {
                     it.copy(
                         apiEndpoint = cleanedVision.ifBlank { it.apiEndpoint },
-                        readTextEndpoint = cleanedRead.ifBlank { it.readTextEndpoint }
+                        readTextEndpoint = cleanedRead.ifBlank { it.readTextEndpoint },
+                        askQuestionEndpoint = cleanedAsk.ifBlank { it.askQuestionEndpoint }
                     )
                 }
                 _userMessage.tryEmit("API Endpoints updated")
@@ -667,31 +685,146 @@ class AyneViewModel(
         processingFeedbackHelper?.startWorkingFeedback(viewModelScope)
 
         viewModelScope.launch {
-            val endpoint = state.apiEndpoint
+            val askEndpoint = state.askQuestionEndpoint
+            val visionEndpoint = state.apiEndpoint
             val voice = state.customVoice
             val prefLang = if (state.selectedLanguage == SupportedLanguage.ENGLISH) "en" else "am"
-
-            // Turn 2+ Zero-Upload: If sessionId is cached, send ONLY sessionId! 0 image bytes uploaded!
             val sendSessionId = sid
 
-            if (sendSessionId != null) {
-                // Direct Fast Zero-Upload Call to /api/see-and-describe (~2.8s response budget)
-                // We do NOT send client history: the server already holds the session conversation context.
-                val result = visionApiService.seeAndDescribe(
-                    endpointUrl = endpoint,
-                    imageBase64 = null,
+            var receivedAnswer = false
+            var currentTranscribedQuery: String? = textQuery
+            val audioChunks = StringBuilder()
+
+            // 1. Primary: Dedicated Real-Time SSE Stream (POST /api/ask-question/stream)
+            val streamResult = visionApiService.askQuestionStream(
+                baseEndpointUrl = askEndpoint,
+                sessionId = sendSessionId,
+                audioBase64 = voiceBase64,
+                query = textQuery,
+                imageBase64 = if (sendSessionId == null) lockedImage else null,
+                customVoice = voice,
+                ttsProvider = "addis",
+                preferredLanguage = prefLang,
+                includeAudio = true,
+                onTranscription = { transEv ->
+                    val queryText = transEv.transcribedQuery.ifBlank { textQuery ?: "" }
+                    currentTranscribedQuery = queryText
+                    if (queryText.isNotBlank()) {
+                        val transMsg = if (prefLang == "en") "Question: \"$queryText\"" else "ጥያቄ፡ \"$queryText\""
+                        _uiState.update { it.copy(busyMessage = transMsg) }
+                        _userMessage.tryEmit(transMsg)
+                    }
+                },
+                onAnswer = { ansEv ->
+                    receivedAnswer = true
+                    processingFeedbackHelper?.stopWorkingFeedback()
+                    processingFeedbackHelper?.playSuccessTone()
+                    if (!ansEv.sessionId.isNullOrBlank()) {
+                        activeSessionId = ansEv.sessionId
+                    }
+                    val chosenAnswer = if (state.selectedLanguage == SupportedLanguage.ENGLISH && ansEv.english.isNotBlank()) {
+                        ansEv.english
+                    } else {
+                        ansEv.amharic.ifBlank { ansEv.english }
+                    }.cleanLabelPrefix()
+
+                    val userTurn = currentTranscribedQuery?.takeIf { it.isNotBlank() } ?: "Voice question"
+                    val updatedHistory = (state.conversationHistory + listOf(
+                        ConversationTurn("user", userTurn),
+                        ConversationTurn("model", chosenAnswer)
+                    )).takeLast(10)
+
+                    _uiState.update {
+                        it.copy(
+                            activeSessionId = activeSessionId,
+                            lastAnswer = chosenAnswer,
+                            lastEnglishAnswer = ansEv.english,
+                            lastReadResponse = null,
+                            conversationHistory = updatedHistory,
+                            busyMessage = null
+                        )
+                    }
+                },
+                onAudioChunk = { chunkEv ->
+                    audioChunks.append(chunkEv.chunkBase64)
+                    // Progressive streaming MP3 playback through speaker (<1.2s first word)
+                    audioPlaybackHelper.enqueueAudioChunk(
+                        context = context,
+                        rawBase64Chunk = chunkEv.chunkBase64,
+                        format = chunkEv.format,
+                        onError = { err ->
+                            _userMessage.tryEmit("Audio error: $err")
+                        }
+                    )
+                },
+                onErrorEvent = { code, message ->
+                    processingFeedbackHelper?.stopWorkingFeedback()
+                    processingFeedbackHelper?.playInstantTapEarcon()
+                    if (code == "SESSION_EXPIRED") {
+                        activeSessionId = null
+                        _uiState.update {
+                            it.copy(
+                                activeSessionId = null,
+                                lockedImageBase64 = null,
+                                isBusy = false,
+                                busyMessage = null
+                            )
+                        }
+                        val prompt = context.getString(R.string.session_expired_prompt)
+                        _userMessage.tryEmit(prompt)
+                    } else if (code == "INADMISSIBLE_AUDIO") {
+                        _uiState.update {
+                            it.copy(
+                                isBusy = false,
+                                busyMessage = null
+                            )
+                        }
+                        val prompt = if (message.isNotBlank() && message != "INADMISSIBLE_AUDIO") {
+                            message
+                        } else {
+                            context.getString(R.string.inadmissible_audio_prompt)
+                        }
+                        _userMessage.tryEmit(prompt)
+                    } else {
+                        _uiState.update {
+                            it.copy(
+                                isBusy = false,
+                                busyMessage = null
+                            )
+                        }
+                        _userMessage.tryEmit("Error ($code): $message")
+                    }
+                },
+                onDone = {
+                    _uiState.update {
+                        it.copy(
+                            isBusy = false,
+                            busyMessage = null
+                        )
+                    }
+                    val fullAudio = audioChunks.toString()
+                    if (fullAudio.isNotBlank()) {
+                        _uiState.update { it.copy(lastAudioBase64 = fullAudio) }
+                        audioPlaybackHelper.setLastConsolidatedAudio(context, fullAudio)
+                    }
+                }
+            )
+
+            // 2. Fallback to buffered JSON (POST /api/ask-question) if streaming failed before answer
+            if (streamResult.isFailure && !receivedAnswer) {
+                val bufferedResult = visionApiService.askQuestion(
+                    endpointUrl = askEndpoint,
                     sessionId = sendSessionId,
                     audioBase64 = voiceBase64,
                     query = textQuery,
-                    history = emptyList(),
+                    imageBase64 = if (sendSessionId == null) lockedImage else null,
                     customVoice = voice,
                     ttsProvider = "addis",
                     preferredLanguage = prefLang,
-                    mode = "general",
                     includeAudio = true
                 )
 
-                result.onSuccess { response ->
+                bufferedResult.onSuccess { response ->
                     processingFeedbackHelper?.stopWorkingFeedback()
                     processingFeedbackHelper?.playSuccessTone()
                     if (!response.sessionId.isNullOrBlank()) {
@@ -703,7 +836,7 @@ class AyneViewModel(
                         response.amharic.ifBlank { response.english }
                     }.cleanLabelPrefix()
 
-                    val userTurn = response.transcribedQuery?.takeIf { it.isNotBlank() } ?: textQuery ?: "Voice question"
+                    val userTurn = response.transcribedQuery?.takeIf { it.isNotBlank() } ?: currentTranscribedQuery ?: "Voice question"
                     val updatedHistory = (state.conversationHistory + listOf(
                         ConversationTurn("user", userTurn),
                         ConversationTurn("model", chosenAnswer)
@@ -734,93 +867,11 @@ class AyneViewModel(
                         )
                     }
                 }.onFailure { error ->
-                    processingFeedbackHelper?.stopWorkingFeedback()
-                    _uiState.update {
-                        it.copy(
-                            isBusy = false,
-                            busyMessage = null
-                        )
-                    }
-                    val errMsg = error.localizedMessage ?: "Network error connecting to $endpoint"
-                    _userMessage.tryEmit("Error: $errMsg")
-                }
-            } else {
-                // Fallback when activeSessionId is null: stream with locked image
-                var receivedVision = false
-                val audioChunks = StringBuilder()
-
-                val streamResult = visionApiService.seeAndDescribeStream(
-                    baseEndpointUrl = endpoint,
-                    imageBase64 = lockedImage,
-                    sessionId = null,
-                    audioBase64 = voiceBase64,
-                    query = textQuery,
-                    history = state.conversationHistory.takeLast(6),
-                    customVoice = voice,
-                    ttsProvider = "addis",
-                    preferredLanguage = prefLang,
-                    mode = "general",
-                    onVision = { visionEvent ->
-                        receivedVision = true
-                        processingFeedbackHelper?.stopWorkingFeedback()
-                        processingFeedbackHelper?.playSuccessTone()
-                        if (!visionEvent.sessionId.isNullOrBlank()) {
-                            activeSessionId = visionEvent.sessionId
-                        }
-                        val chosenAnswer = if (state.selectedLanguage == SupportedLanguage.ENGLISH && visionEvent.english.isNotBlank()) {
-                            visionEvent.english
-                        } else {
-                            visionEvent.amharic.ifBlank { visionEvent.english }
-                        }.cleanLabelPrefix()
-
-                        val prompt = textQuery ?: "Voice question"
-                        val updatedHistory = (state.conversationHistory + listOf(
-                            ConversationTurn("user", prompt),
-                            ConversationTurn("model", chosenAnswer)
-                        )).takeLast(10)
-
-                        _uiState.update {
-                            it.copy(
-                                activeSessionId = activeSessionId,
-                                lastAnswer = chosenAnswer,
-                                lastEnglishAnswer = visionEvent.english,
-                                lastReadResponse = null,
-                                conversationHistory = updatedHistory,
-                                busyMessage = null
-                            )
-                        }
-                    },
-                    onAudioChunk = { chunkEvent ->
-                        audioChunks.append(chunkEvent.chunkBase64)
-                        audioPlaybackHelper.enqueueAudioChunk(
-                            context = context,
-                            rawBase64Chunk = chunkEvent.chunkBase64,
-                            format = chunkEvent.format,
-                            onError = { err ->
-                                _userMessage.tryEmit("Audio error: $err")
-                            }
-                        )
-                    },
-                    onDone = {
-                        _uiState.update {
-                            it.copy(
-                                isBusy = false,
-                                busyMessage = null
-                            )
-                        }
-                        val fullAudio = audioChunks.toString()
-                        if (fullAudio.isNotBlank()) {
-                            _uiState.update { it.copy(lastAudioBase64 = fullAudio) }
-                            audioPlaybackHelper.setLastConsolidatedAudio(context, fullAudio)
-                        }
-                    }
-                )
-
-                if (streamResult.isFailure && !receivedVision) {
-                    val singleResult = visionApiService.seeAndDescribe(
-                        endpointUrl = endpoint,
-                        imageBase64 = lockedImage,
-                        sessionId = null,
+                    // 3. Fallback to /api/see-and-describe legacy endpoint
+                    val legacyResult = visionApiService.seeAndDescribe(
+                        endpointUrl = visionEndpoint,
+                        imageBase64 = if (sendSessionId == null) lockedImage else null,
+                        sessionId = sendSessionId,
                         audioBase64 = voiceBase64,
                         query = textQuery,
                         history = state.conversationHistory.takeLast(6),
@@ -831,7 +882,7 @@ class AyneViewModel(
                         includeAudio = true
                     )
 
-                    singleResult.onSuccess { response ->
+                    legacyResult.onSuccess { response ->
                         processingFeedbackHelper?.stopWorkingFeedback()
                         processingFeedbackHelper?.playSuccessTone()
                         if (!response.sessionId.isNullOrBlank()) {
@@ -843,7 +894,7 @@ class AyneViewModel(
                             response.amharic.ifBlank { response.english }
                         }.cleanLabelPrefix()
 
-                        val userTurn = response.transcribedQuery?.takeIf { it.isNotBlank() } ?: textQuery ?: "Voice question"
+                        val userTurn = response.transcribedQuery?.takeIf { it.isNotBlank() } ?: currentTranscribedQuery ?: "Voice question"
                         val updatedHistory = (state.conversationHistory + listOf(
                             ConversationTurn("user", userTurn),
                             ConversationTurn("model", chosenAnswer)
@@ -873,7 +924,7 @@ class AyneViewModel(
                                 }
                             )
                         }
-                    }.onFailure { error ->
+                    }.onFailure { legacyError ->
                         processingFeedbackHelper?.stopWorkingFeedback()
                         _uiState.update {
                             it.copy(
@@ -881,16 +932,16 @@ class AyneViewModel(
                                 busyMessage = null
                             )
                         }
-                        val errMsg = error.localizedMessage ?: "Network error connecting to $endpoint"
+                        val errMsg = legacyError.localizedMessage ?: error.localizedMessage ?: "Network error connecting to $askEndpoint"
                         _userMessage.tryEmit("Error: $errMsg")
                     }
-                } else if (streamResult.isFailure && receivedVision) {
-                    _uiState.update {
-                        it.copy(
-                            isBusy = false,
-                            busyMessage = null
-                        )
-                    }
+                }
+            } else if (streamResult.isFailure && receivedAnswer) {
+                _uiState.update {
+                    it.copy(
+                        isBusy = false,
+                        busyMessage = null
+                    )
                 }
             }
         }
@@ -1401,8 +1452,12 @@ fun AyneAppScreen(
         when (uiState.selectedLanguage) {
             SupportedLanguage.ENGLISH -> {
                 EnglishMockScreen(
-                    isFrontCamera = uiState.isFrontCamera,
+                    uiState = uiState,
                     onAction = { action -> viewModel.onAction(context, action) },
+                    onDescribeClick = { triggerDescribeSurroundings() },
+                    onReadTextClick = { triggerReadText() },
+                    onAskQuestionClick = { triggerVolumeFollowUp() },
+                    onRepeatClick = { viewModel.onAction(context, AyneAction.RepeatLastAnswer) },
                     onLanguageSelected = { lang -> viewModel.onAction(context, AyneAction.SelectLanguage(lang)) },
                     onFlipCamera = {
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -1414,8 +1469,12 @@ fun AyneAppScreen(
             }
             SupportedLanguage.AFAN_OROMOO -> {
                 AfaanOromooMockScreen(
-                    isFrontCamera = uiState.isFrontCamera,
+                    uiState = uiState,
                     onAction = { action -> viewModel.onAction(context, action) },
+                    onDescribeClick = { triggerDescribeSurroundings() },
+                    onReadTextClick = { triggerReadText() },
+                    onAskQuestionClick = { triggerVolumeFollowUp() },
+                    onRepeatClick = { viewModel.onAction(context, AyneAction.RepeatLastAnswer) },
                     onLanguageSelected = { lang -> viewModel.onAction(context, AyneAction.SelectLanguage(lang)) },
                     onFlipCamera = {
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -1446,11 +1505,12 @@ fun AyneAppScreen(
             VisionSettingsDialog(
                 currentEndpoint = uiState.apiEndpoint,
                 currentReadTextEndpoint = uiState.readTextEndpoint,
+                currentAskQuestionEndpoint = uiState.askQuestionEndpoint,
                 currentVoice = uiState.customVoice,
                 onDismiss = { showSettingsDialog = false },
-                onSave = { newVisionUrl, newReadUrl, newVoice ->
+                onSave = { newVisionUrl, newReadUrl, newAskUrl, newVoice ->
                     showSettingsDialog = false
-                    viewModel.onAction(context, AyneAction.UpdateEndpoints(newVisionUrl, newReadUrl))
+                    viewModel.onAction(context, AyneAction.UpdateEndpoints(newVisionUrl, newReadUrl, newAskUrl))
                     viewModel.onAction(context, AyneAction.UpdateVoice(newVoice))
                 }
             )
@@ -2505,12 +2565,14 @@ fun AyneBottomControls(
 fun VisionSettingsDialog(
     currentEndpoint: String,
     currentReadTextEndpoint: String,
+    currentAskQuestionEndpoint: String,
     currentVoice: String,
     onDismiss: () -> Unit,
-    onSave: (newVisionUrl: String, newReadTextUrl: String, newVoice: String) -> Unit
+    onSave: (newVisionUrl: String, newReadTextUrl: String, newAskQuestionUrl: String, newVoice: String) -> Unit
 ) {
     var visionUrlText by remember { mutableStateOf(currentEndpoint) }
     var readTextUrlText by remember { mutableStateOf(currentReadTextEndpoint) }
+    var askQuestionUrlText by remember { mutableStateOf(currentAskQuestionEndpoint) }
     var selectedVoice by remember { mutableStateOf(currentVoice) }
 
     val voices = listOf(
@@ -2594,14 +2656,38 @@ fun VisionSettingsDialog(
                     ),
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.Uri,
-                        imeAction = ImeAction.Done
+                        imeAction = ImeAction.Next
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("read_text_endpoint_input")
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Ask Question Real-time Stream URL
+                OutlinedTextField(
+                    value = askQuestionUrlText,
+                    onValueChange = { askQuestionUrlText = it },
+                    label = { Text(stringResource(R.string.ask_question_endpoint_label), color = AyneVibrantYellow) },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = AyneVibrantYellow,
+                        unfocusedBorderColor = AynePureWhite,
+                        focusedTextColor = AynePureWhite,
+                        unfocusedTextColor = AynePureWhite,
+                        cursorColor = AyneVibrantYellow
+                    ),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Uri,
+                        imeAction = ImeAction.Done
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("ask_question_endpoint_input")
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
 
                 Text(
                     text = stringResource(R.string.voice_selector_label),
@@ -2635,11 +2721,27 @@ fun VisionSettingsDialog(
                         )
                     }
                 }
+
+                OutlinedButton(
+                    onClick = {
+                        visionUrlText = AyneUiState.DEFAULT_ENDPOINT
+                        readTextUrlText = AyneUiState.DEFAULT_READ_TEXT_ENDPOINT
+                        askQuestionUrlText = AyneUiState.DEFAULT_ASK_QUESTION_ENDPOINT
+                        selectedVoice = "am-hamen"
+                    },
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.align(Alignment.End)
+                ) {
+                    Text(
+                        text = stringResource(R.string.reset_default),
+                        color = AyneVibrantYellow
+                    )
+                }
             }
         },
         confirmButton = {
             Button(
-                onClick = { onSave(visionUrlText, readTextUrlText, selectedVoice) },
+                onClick = { onSave(visionUrlText, readTextUrlText, askQuestionUrlText, selectedVoice) },
                 colors = ButtonDefaults.buttonColors(
                     containerColor = AyneVibrantYellow,
                     contentColor = AyneOnYellow

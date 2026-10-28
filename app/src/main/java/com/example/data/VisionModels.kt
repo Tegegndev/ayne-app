@@ -253,3 +253,62 @@ data class ReadTextOcrEvent(
         }
     }
 }
+
+/**
+ * Real-time Streaming Events for POST /api/ask-question/stream
+ */
+data class AskQuestionTranscriptionEvent(
+    val transcribedQuery: String,
+    val detectedLanguage: String?,
+    val sttLatencyMs: Long?
+) {
+    companion object {
+        fun fromJson(jsonStr: String): AskQuestionTranscriptionEvent {
+            val root = JSONObject(jsonStr)
+            return AskQuestionTranscriptionEvent(
+                transcribedQuery = root.optString("transcribedQuery", ""),
+                detectedLanguage = root.optString("detectedLanguage").takeIf { it.isNotEmpty() },
+                sttLatencyMs = if (root.has("sttLatencyMs")) root.optLong("sttLatencyMs") else null
+            )
+        }
+    }
+}
+
+data class AskQuestionAnswerEvent(
+    val sessionId: String?,
+    val amharic: String,
+    val english: String,
+    val visionLatencyMs: Long?
+) {
+    companion object {
+        fun fromJson(jsonStr: String): AskQuestionAnswerEvent {
+            val root = JSONObject(jsonStr)
+            val rawAmharic = root.optString("amharic").ifEmpty {
+                root.optString("cleanSpeech").ifEmpty { root.optString("text", "") }
+            }
+            return AskQuestionAnswerEvent(
+                sessionId = root.optString("sessionId").takeIf { it.isNotBlank() && it != "null" },
+                amharic = rawAmharic.cleanLabelPrefix(),
+                english = root.optString("english", ""),
+                visionLatencyMs = if (root.has("visionLatencyMs")) root.optLong("visionLatencyMs") else null
+            )
+        }
+    }
+}
+
+data class AskQuestionDoneEvent(
+    val sessionId: String?,
+    val turnCount: Int?,
+    val totalLatencyMs: Long?
+) {
+    companion object {
+        fun fromJson(jsonStr: String): AskQuestionDoneEvent {
+            val root = JSONObject(jsonStr)
+            return AskQuestionDoneEvent(
+                sessionId = root.optString("sessionId").takeIf { it.isNotBlank() && it != "null" },
+                turnCount = if (root.has("turnCount")) root.optInt("turnCount") else null,
+                totalLatencyMs = if (root.has("totalLatencyMs")) root.optLong("totalLatencyMs") else null
+            )
+        }
+    }
+}

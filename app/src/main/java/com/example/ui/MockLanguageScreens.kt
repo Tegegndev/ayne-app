@@ -1,5 +1,8 @@
 package com.example.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -12,8 +15,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -21,9 +26,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -33,26 +38,30 @@ import androidx.compose.ui.unit.sp
 import com.example.AyneAction
 import com.example.AyneActionCard
 import com.example.AyneTopBar
+import com.example.AyneUiState
 import com.example.SupportedLanguage
 import com.example.ui.theme.*
 
 /**
- * Clean UI screens for English and Afaan Oromoo matching the Amharic version.
- * High-contrast WCAG AAA design, large touch targets, zero clutter.
+ * Functional, high-contrast WCAG AAA UI screens for English and Afaan Oromoo.
+ * Fully wired to live ViewModel actions, audio playback, camera capture, and multi-turn visual follow-ups.
  */
 
 @Composable
 fun EnglishMockScreen(
-    isFrontCamera: Boolean,
-    onAction: (AyneAction) -> Unit,
-    onLanguageSelected: (SupportedLanguage) -> Unit,
-    onFlipCamera: () -> Unit,
-    onSettingsClick: () -> Unit,
+    uiState: AyneUiState = AyneUiState(selectedLanguage = SupportedLanguage.ENGLISH),
+    onAction: (AyneAction) -> Unit = {},
+    onDescribeClick: () -> Unit = {},
+    onReadTextClick: () -> Unit = {},
+    onAskQuestionClick: () -> Unit = {},
+    onRepeatClick: () -> Unit = {},
+    onLanguageSelected: (SupportedLanguage) -> Unit = {},
+    onFlipCamera: () -> Unit = {},
+    onSettingsClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val haptic = LocalHapticFeedback.current
     val scrollState = rememberScrollState()
-    var showMockResult by remember { mutableStateOf(true) }
 
     Column(
         modifier = modifier
@@ -66,23 +75,211 @@ fun EnglishMockScreen(
             // 1. Top Bar
             AyneTopBar(
                 selectedLanguage = SupportedLanguage.ENGLISH,
-                isFrontCamera = isFrontCamera,
+                isFrontCamera = uiState.isFrontCamera,
                 onLanguageSelected = onLanguageSelected,
                 onFlipCamera = onFlipCamera,
                 onSettingsClick = onSettingsClick
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            // 2. Result Card (Matches Amharic Version exactly)
-            if (showMockResult) {
+            // 2. Active Busy / Analysis Indicator
+            AnimatedVisibility(
+                visible = uiState.isBusy,
+                enter = fadeIn(),
+                exit = fadeOut()
+            ) {
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 16.dp)
+                        .padding(bottom = 12.dp)
+                        .border(2.dp, AyneVibrantYellow, RoundedCornerShape(12.dp))
+                        .semantics {
+                            contentDescription = uiState.busyMessage ?: "Analyzing"
+                        },
+                    color = AyneDarkCard,
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CircularProgressIndicator(
+                            color = AyneVibrantYellow,
+                            strokeWidth = 3.dp,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+                            contentDescription = "Working tone active",
+                            tint = AyneVibrantYellow,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = uiState.busyMessage ?: "Analyzing scene… Please hold steady",
+                            color = AyneVibrantYellow,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            lineHeight = 18.sp
+                        )
+                    }
+                }
+            }
+
+            // 3. Active Voice Recording Indicator Banner
+            if (uiState.isRecordingVoice) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp)
+                        .clickable { onAskQuestionClick() }
+                        .border(2.dp, AyneVibrantYellow, RoundedCornerShape(12.dp))
+                        .semantics {
+                            role = Role.Button
+                            contentDescription = "Microphone recording active. Tap or press Volume Down to finish recording and submit follow-up question."
+                        }
+                        .testTag("card_recording_voice_active_en"),
+                    color = AyneDarkCard,
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(AyneVibrantYellow),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Mic,
+                                contentDescription = null,
+                                tint = AyneOnYellow,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = "Listening… Speak your question. Tap to submit.",
+                            color = AyneVibrantYellow,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            lineHeight = 18.sp
+                        )
+                    }
+                }
+            }
+
+            // 4. Optical Read Result (when available)
+            val readResp = uiState.lastReadResponse
+            if (readResp != null && !uiState.isBusy) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 14.dp)
+                        .border(2.dp, AyneVibrantYellow, RoundedCornerShape(12.dp))
+                        .semantics {
+                            contentDescription = "Read Text Result: ${readResp.english.ifBlank { readResp.amharic }}"
+                        },
+                    color = AyneDarkCard,
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = readResp.signType ?: "Document / Sign",
+                                color = AyneVibrantYellow,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            IconButton(
+                                onClick = { onAction(AyneAction.DismissResult) },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Close,
+                                    contentDescription = "Dismiss result",
+                                    tint = AynePureWhite,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+
+                        if (!readResp.locationContext.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Filled.LocationOn,
+                                    contentDescription = null,
+                                    tint = AynePureWhite.copy(alpha = 0.8f),
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = readResp.locationContext,
+                                    color = AynePureWhite.copy(alpha = 0.85f),
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Text(
+                            text = if (readResp.english.isNotBlank()) readResp.english else readResp.amharic,
+                            color = AynePureWhite,
+                            fontSize = 16.sp,
+                            lineHeight = 22.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+
+                        if (readResp.isCutOff || readResp.isBlurry) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(AyneVibrantYellow.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
+                                    .border(1.dp, AyneVibrantYellow, RoundedCornerShape(8.dp))
+                                    .padding(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Warning,
+                                    contentDescription = null,
+                                    tint = AyneVibrantYellow,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = readResp.cameraGuidance ?: if (readResp.isCutOff) "Text is cut off. Please move camera back." else "Image is blurry. Please hold steady.",
+                                    color = AyneVibrantYellow,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
+                }
+            } else if (!uiState.lastAnswer.isNullOrBlank() && !uiState.isBusy) {
+                // 5. Visual Description Result Card
+                val displayAnswer = uiState.lastEnglishAnswer?.takeIf { it.isNotBlank() } ?: uiState.lastAnswer ?: ""
+                val secondaryAmharic = if (uiState.lastEnglishAnswer?.isNotBlank() == true) uiState.lastAnswer else null
+
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 14.dp)
                         .border(1.dp, AyneVibrantYellow.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
                         .semantics {
-                            contentDescription = "Last answer: On the table there is a white coffee cup, a dark red notebook, and a 100 Birr banknote next to a set of keys."
+                            contentDescription = "Last answer: $displayAnswer"
                         },
                     color = AyneDarkCard,
                     shape = RoundedCornerShape(12.dp)
@@ -100,10 +297,7 @@ fun EnglishMockScreen(
                                 fontWeight = FontWeight.Bold
                             )
                             IconButton(
-                                onClick = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    showMockResult = false
-                                },
+                                onClick = { onAction(AyneAction.DismissResult) },
                                 modifier = Modifier.size(28.dp)
                             ) {
                                 Icon(
@@ -118,39 +312,40 @@ fun EnglishMockScreen(
                         Spacer(modifier = Modifier.height(6.dp))
 
                         Text(
-                            text = "On the table in front of you, there is a white coffee cup, a dark red notebook, and a 100 Birr banknote next to a set of keys.",
+                            text = displayAnswer,
                             color = AynePureWhite,
                             fontSize = 16.sp,
                             lineHeight = 22.sp,
                             fontWeight = FontWeight.SemiBold
                         )
 
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        // Secondary Translation (Amharic)
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = AynePureBlack,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                text = "(አማርኛ) በጠረጴዛው ላይ ባለ ነጭ የቡና ስኒ፣ ደማቅ ቀይ ማስታወሻ ደብተር እና የ100 ብር ኖት ከመክፈቻ ቁልፍ አጠገብ አለ።",
-                                color = AynePureWhite.copy(alpha = 0.85f),
-                                fontSize = 13.sp,
-                                lineHeight = 18.sp,
-                                modifier = Modifier.padding(8.dp)
-                            )
+                        if (!secondaryAmharic.isNullOrBlank() && secondaryAmharic != displayAnswer) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = AynePureBlack,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = secondaryAmharic,
+                                    color = AynePureWhite.copy(alpha = 0.85f),
+                                    fontSize = 13.sp,
+                                    lineHeight = 18.sp,
+                                    modifier = Modifier.padding(8.dp)
+                                )
+                            }
                         }
 
                         Spacer(modifier = Modifier.height(8.dp))
 
-                        // Audio indicator
+                        // Audio indicator / Tap to replay
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
                                 .clip(RoundedCornerShape(6.dp))
                                 .clickable {
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    onRepeatClick()
                                 }
                                 .padding(vertical = 4.dp, horizontal = 2.dp)
                         ) {
@@ -180,7 +375,7 @@ fun EnglishMockScreen(
                 }
             }
 
-            // 3. Three Stacked Action Cards (Exactly like Amharic Version)
+            // 6. Three Stacked Action Cards (Wired directly to active camera & API)
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -193,7 +388,7 @@ fun EnglishMockScreen(
                     testTag = "card_describe_surroundings_en",
                     onClick = {
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        showMockResult = true
+                        onDescribeClick()
                     }
                 )
 
@@ -205,19 +400,26 @@ fun EnglishMockScreen(
                     testTag = "card_read_text_en",
                     onClick = {
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        showMockResult = true
+                        onReadTextClick()
                     }
                 )
+
+                val askSubtitle = when {
+                    uiState.isRecordingVoice -> "Recording… Tap to submit"
+                    uiState.activeSessionId != null -> "Ask follow-up (0 image bytes)"
+                    uiState.lockedImageBase64 != null -> "Ask follow-up about scene"
+                    else -> "Ask about captured scene (Take photo first)"
+                }
 
                 AyneActionCard(
                     icon = Icons.Filled.Mic,
                     title = "Ask Question",
-                    subtitle = "Ask about the captured scene",
+                    subtitle = askSubtitle,
                     contentDescription = "Ask question. Ask about the captured scene button",
                     testTag = "card_ask_question_en",
                     onClick = {
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        showMockResult = true
+                        onAskQuestionClick()
                     }
                 )
             }
@@ -225,14 +427,14 @@ fun EnglishMockScreen(
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        // 4. Bottom Controls (Exactly like Amharic Version)
+        // 7. Bottom Controls
         CleanLanguageBottomControls(
             buttonLabel = "Repeat Last Answer",
             volumeUpHint = "Press Volume+ to take a photo",
             volumeDownHint = "Press Volume− to ask follow-up",
             onRepeatClick = {
                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                showMockResult = true
+                onRepeatClick()
             }
         )
     }
@@ -240,16 +442,19 @@ fun EnglishMockScreen(
 
 @Composable
 fun AfaanOromooMockScreen(
-    isFrontCamera: Boolean,
-    onAction: (AyneAction) -> Unit,
-    onLanguageSelected: (SupportedLanguage) -> Unit,
-    onFlipCamera: () -> Unit,
-    onSettingsClick: () -> Unit,
+    uiState: AyneUiState = AyneUiState(selectedLanguage = SupportedLanguage.AFAN_OROMOO),
+    onAction: (AyneAction) -> Unit = {},
+    onDescribeClick: () -> Unit = {},
+    onReadTextClick: () -> Unit = {},
+    onAskQuestionClick: () -> Unit = {},
+    onRepeatClick: () -> Unit = {},
+    onLanguageSelected: (SupportedLanguage) -> Unit = {},
+    onFlipCamera: () -> Unit = {},
+    onSettingsClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val haptic = LocalHapticFeedback.current
     val scrollState = rememberScrollState()
-    var showMockResult by remember { mutableStateOf(true) }
 
     Column(
         modifier = modifier
@@ -263,23 +468,208 @@ fun AfaanOromooMockScreen(
             // 1. Top Bar
             AyneTopBar(
                 selectedLanguage = SupportedLanguage.AFAN_OROMOO,
-                isFrontCamera = isFrontCamera,
+                isFrontCamera = uiState.isFrontCamera,
                 onLanguageSelected = onLanguageSelected,
                 onFlipCamera = onFlipCamera,
                 onSettingsClick = onSettingsClick
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            // 2. Result Card (Matches Amharic Version exactly)
-            if (showMockResult) {
+            // 2. Active Busy / Analysis Indicator
+            AnimatedVisibility(
+                visible = uiState.isBusy,
+                enter = fadeIn(),
+                exit = fadeOut()
+            ) {
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 16.dp)
+                        .padding(bottom = 12.dp)
+                        .border(2.dp, AyneVibrantYellow, RoundedCornerShape(12.dp))
+                        .semantics {
+                            contentDescription = uiState.busyMessage ?: "Xiinxalaa jira"
+                        },
+                    color = AyneDarkCard,
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CircularProgressIndicator(
+                            color = AyneVibrantYellow,
+                            strokeWidth = 3.dp,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+                            contentDescription = "Sagalee xiinxallaa",
+                            tint = AyneVibrantYellow,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = uiState.busyMessage ?: "Naannoo xiinxalaa jira… Suuraa qabadhaa",
+                            color = AyneVibrantYellow,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            lineHeight = 18.sp
+                        )
+                    }
+                }
+            }
+
+            // 3. Active Voice Recording Indicator Banner
+            if (uiState.isRecordingVoice) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp)
+                        .clickable { onAskQuestionClick() }
+                        .border(2.dp, AyneVibrantYellow, RoundedCornerShape(12.dp))
+                        .semantics {
+                            role = Role.Button
+                            contentDescription = "Waraabbiin sagalee banaadha. Xumuruuf tuqi."
+                        }
+                        .testTag("card_recording_voice_active_om"),
+                    color = AyneDarkCard,
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(AyneVibrantYellow),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Mic,
+                                contentDescription = null,
+                                tint = AyneOnYellow,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = "Dhaggeeffachaa jira… Gaaffii keessan dubbadhaa.",
+                            color = AyneVibrantYellow,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            lineHeight = 18.sp
+                        )
+                    }
+                }
+            }
+
+            // 4. Optical Read Result (when available)
+            val readResp = uiState.lastReadResponse
+            if (readResp != null && !uiState.isBusy) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 14.dp)
+                        .border(2.dp, AyneVibrantYellow, RoundedCornerShape(12.dp))
+                        .semantics {
+                            contentDescription = "Bu'aa barruu: ${readResp.amharic.ifBlank { readResp.english }}"
+                        },
+                    color = AyneDarkCard,
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = readResp.signType ?: "Asxaa / Waraqaa",
+                                color = AyneVibrantYellow,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            IconButton(
+                                onClick = { onAction(AyneAction.DismissResult) },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Close,
+                                    contentDescription = "Cufi",
+                                    tint = AynePureWhite,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+
+                        if (!readResp.locationContext.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Filled.LocationOn,
+                                    contentDescription = null,
+                                    tint = AynePureWhite.copy(alpha = 0.8f),
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = readResp.locationContext,
+                                    color = AynePureWhite.copy(alpha = 0.85f),
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Text(
+                            text = readResp.amharic.ifBlank { readResp.english },
+                            color = AynePureWhite,
+                            fontSize = 16.sp,
+                            lineHeight = 22.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+
+                        if (readResp.isCutOff || readResp.isBlurry) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(AyneVibrantYellow.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
+                                    .border(1.dp, AyneVibrantYellow, RoundedCornerShape(8.dp))
+                                    .padding(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Warning,
+                                    contentDescription = null,
+                                    tint = AyneVibrantYellow,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = readResp.cameraGuidance ?: "Barruun murameera. Kaameeraa gara duubatti siqsaa.",
+                                    color = AyneVibrantYellow,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
+                }
+            } else if (!uiState.lastAnswer.isNullOrBlank() && !uiState.isBusy) {
+                // 5. Visual Description Result Card
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 14.dp)
                         .border(1.dp, AyneVibrantYellow.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
                         .semantics {
-                            contentDescription = "Deebii: Minjaala irra kubbayyaa bunaa adii, dabtara nootii bifa diimaa dukkanaawaa fi maallaqa qarshii 100 banaa qulfii cinaa jiru argina."
+                            contentDescription = "Deebii: ${uiState.lastAnswer}"
                         },
                     color = AyneDarkCard,
                     shape = RoundedCornerShape(12.dp)
@@ -297,10 +687,7 @@ fun AfaanOromooMockScreen(
                                 fontWeight = FontWeight.Bold
                             )
                             IconButton(
-                                onClick = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    showMockResult = false
-                                },
+                                onClick = { onAction(AyneAction.DismissResult) },
                                 modifier = Modifier.size(28.dp)
                             ) {
                                 Icon(
@@ -315,28 +702,28 @@ fun AfaanOromooMockScreen(
                         Spacer(modifier = Modifier.height(6.dp))
 
                         Text(
-                            text = "Minjaala irra kubbayyaa bunaa adii, dabtara nootii bifa diimaa dukkanaawaa fi maallaqa qarshii 100 banaa qulfii cinaa jiru argina.",
+                            text = uiState.lastAnswer ?: "",
                             color = AynePureWhite,
                             fontSize = 16.sp,
                             lineHeight = 22.sp,
                             fontWeight = FontWeight.SemiBold
                         )
 
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        // Secondary Translation (English)
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = AynePureBlack,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                text = "(English) On the table in front of you, there is a white coffee cup, a dark red notebook, and a 100 Birr banknote.",
-                                color = AynePureWhite.copy(alpha = 0.85f),
-                                fontSize = 13.sp,
-                                lineHeight = 18.sp,
-                                modifier = Modifier.padding(8.dp)
-                            )
+                        if (!uiState.lastEnglishAnswer.isNullOrBlank() && uiState.lastEnglishAnswer != uiState.lastAnswer) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = AynePureBlack,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = uiState.lastEnglishAnswer ?: "",
+                                    color = AynePureWhite.copy(alpha = 0.85f),
+                                    fontSize = 13.sp,
+                                    lineHeight = 18.sp,
+                                    modifier = Modifier.padding(8.dp)
+                                )
+                            }
                         }
 
                         Spacer(modifier = Modifier.height(8.dp))
@@ -348,6 +735,7 @@ fun AfaanOromooMockScreen(
                                 .clip(RoundedCornerShape(6.dp))
                                 .clickable {
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    onRepeatClick()
                                 }
                                 .padding(vertical = 4.dp, horizontal = 2.dp)
                         ) {
@@ -377,7 +765,7 @@ fun AfaanOromooMockScreen(
                 }
             }
 
-            // 3. Three Stacked Action Cards (Exactly like Amharic Version)
+            // 6. Three Stacked Action Cards (Wired directly to active camera & API)
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -390,7 +778,7 @@ fun AfaanOromooMockScreen(
                     testTag = "card_describe_surroundings_om",
                     onClick = {
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        showMockResult = true
+                        onDescribeClick()
                     }
                 )
 
@@ -402,19 +790,26 @@ fun AfaanOromooMockScreen(
                     testTag = "card_read_text_om",
                     onClick = {
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        showMockResult = true
+                        onReadTextClick()
                     }
                 )
+
+                val askSubtitle = when {
+                    uiState.isRecordingVoice -> "Waraabaa jira… Xumuruuf tuqi"
+                    uiState.activeSessionId != null -> "Gaaffii dabalataa gaafadhu (Suuraa qabame)"
+                    uiState.lockedImageBase64 != null -> "Gaaffii dabalataa gaafadhu"
+                    else -> "Suuraa irratti gaafadhu (Dura suuraa kaasi)"
+                }
 
                 AyneActionCard(
                     icon = Icons.Filled.Mic,
                     title = "Gaaffii Gaafadhu",
-                    subtitle = "Suuraa irratti sagaleen gaafadhu",
+                    subtitle = askSubtitle,
                     contentDescription = "Gaaffii gaafadhu. Suuraa irratti gaafachuuf tuqi",
                     testTag = "card_ask_question_om",
                     onClick = {
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        showMockResult = true
+                        onAskQuestionClick()
                     }
                 )
             }
@@ -422,14 +817,14 @@ fun AfaanOromooMockScreen(
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        // 4. Bottom Controls (Exactly like Amharic Version)
+        // 7. Bottom Controls
         CleanLanguageBottomControls(
             buttonLabel = "Deebii Irra Deebi'i",
             volumeUpHint = "Volume+ suuraa kaasuuf",
             volumeDownHint = "Volume− gaaffii dabalataa gaafachuuf",
             onRepeatClick = {
                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                showMockResult = true
+                onRepeatClick()
             }
         )
     }
@@ -510,13 +905,7 @@ private fun CleanLanguageBottomControls(
 @Composable
 fun EnglishMockScreenPreview() {
     AyneTheme {
-        EnglishMockScreen(
-            isFrontCamera = false,
-            onAction = {},
-            onLanguageSelected = {},
-            onFlipCamera = {},
-            onSettingsClick = {}
-        )
+        EnglishMockScreen()
     }
 }
 
@@ -524,12 +913,6 @@ fun EnglishMockScreenPreview() {
 @Composable
 fun AfaanOromooMockScreenPreview() {
     AyneTheme {
-        AfaanOromooMockScreen(
-            isFrontCamera = false,
-            onAction = {},
-            onLanguageSelected = {},
-            onFlipCamera = {},
-            onSettingsClick = {}
-        )
+        AfaanOromooMockScreen()
     }
 }
