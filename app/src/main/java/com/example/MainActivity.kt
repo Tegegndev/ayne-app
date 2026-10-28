@@ -1226,7 +1226,11 @@ class AyneViewModel(
         viewModelScope.launch {
             val endpoint = state.readTextEndpoint
             val voice = state.customVoice
-            val prefLang = if (state.selectedLanguage == SupportedLanguage.ENGLISH) "en" else "am"
+            val prefLang = when (state.selectedLanguage) {
+                SupportedLanguage.ENGLISH -> "en"
+                SupportedLanguage.AFAN_OROMOO -> "om"
+                SupportedLanguage.AMHARIC -> "am"
+            }
             val ttsProvider = if (prefLang == "en") "gemini" else "addis"
 
             var receivedOcr = false
@@ -1248,10 +1252,10 @@ class AyneViewModel(
                     processingFeedbackHelper?.playSuccessTone()
 
                     val response = ocrEvent.toReadTextResponse()
-                    val chosenAnswer = if (prefLang == "en" && response.english.isNotBlank()) {
-                        response.english
-                    } else {
-                        response.amharic.ifBlank { response.english }
+                    val chosenAnswer = when {
+                        prefLang == "en" && response.english.isNotBlank() -> response.english
+                        prefLang == "om" && response.oromo.isNotBlank() -> response.oromo
+                        else -> response.amharic.ifBlank { response.english }
                     }.cleanLabelPrefix()
 
                     val guidanceMsg = when {
@@ -1318,10 +1322,10 @@ class AyneViewModel(
                 singleResult.onSuccess { response ->
                     processingFeedbackHelper?.stopWorkingFeedback()
                     processingFeedbackHelper?.playSuccessTone()
-                    val chosenAnswer = if (prefLang == "en" && response.english.isNotBlank()) {
-                        response.english
-                    } else {
-                        response.amharic.ifBlank { response.english }
+                    val chosenAnswer = when {
+                        prefLang == "en" && response.english.isNotBlank() -> response.english
+                        prefLang == "om" && response.oromo.isNotBlank() -> response.oromo
+                        else -> response.amharic.ifBlank { response.english }
                     }.cleanLabelPrefix()
 
                     val guidanceMsg = when {

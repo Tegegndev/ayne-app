@@ -651,7 +651,7 @@ fun AfaanOromooMockScreen(
                         .padding(bottom = 14.dp)
                         .border(2.dp, AyneVibrantYellow, RoundedCornerShape(12.dp))
                         .semantics {
-                            contentDescription = "Bu'aa barruu: ${readResp.amharic.ifBlank { readResp.english }}"
+                            contentDescription = "Bu'aa barruu: ${readResp.oromo.ifBlank { readResp.amharic }.ifBlank { readResp.english }}"
                         },
                     color = AyneDarkCard,
                     shape = RoundedCornerShape(12.dp)
@@ -702,7 +702,7 @@ fun AfaanOromooMockScreen(
                         Spacer(modifier = Modifier.height(8.dp))
 
                         Text(
-                            text = readResp.amharic.ifBlank { readResp.english },
+                            text = readResp.oromo.ifBlank { readResp.amharic }.ifBlank { readResp.english },
                             color = AynePureWhite,
                             fontSize = 16.sp,
                             lineHeight = 22.sp,

@@ -131,6 +131,7 @@ data class ReadTextResponse(
     val extractedText: String?,
     val amharic: String,
     val english: String,
+    val oromo: String = "",
     val cleanSpeech: String?,
     val isLegible: Boolean,
     val isBlurry: Boolean,
@@ -167,6 +168,9 @@ data class ReadTextResponse(
             val resolvedAmharic = rawAmharic.cleanLabelPrefix()
             val cleanSpeech = root.optString("cleanSpeech").takeIf { it.isNotEmpty() && it != "null" }?.cleanLabelPrefix()
             val sessionId = root.optString("sessionId").takeIf { it.isNotBlank() && it != "null" }
+            val rawOromo = root.optString("oromo").ifEmpty {
+                root.optString("afaanOromoo", "")
+            }
 
             return ReadTextResponse(
                 success = root.optBoolean("success", true),
@@ -178,6 +182,7 @@ data class ReadTextResponse(
                 extractedText = root.optString("extractedText").takeIf { it.isNotEmpty() && it != "null" },
                 amharic = resolvedAmharic,
                 english = root.optString("english", ""),
+                oromo = rawOromo.cleanLabelPrefix(),
                 cleanSpeech = cleanSpeech,
                 isLegible = root.optBoolean("isLegible", true),
                 isBlurry = root.optBoolean("isBlurry", false),
@@ -219,6 +224,7 @@ data class ReadTextOcrEvent(
     val spokenAmharic: String?,
     val amharic: String,
     val english: String,
+    val oromo: String = "",
     val cleanSpeech: String?,
     val isCutOff: Boolean,
     val isBlurry: Boolean,
@@ -240,6 +246,7 @@ data class ReadTextOcrEvent(
             extractedText = extractedText,
             amharic = resolvedAmharic,
             english = english,
+            oromo = oromo,
             cleanSpeech = cleanSpeech,
             isLegible = isLegible,
             isBlurry = isBlurry,
@@ -268,6 +275,9 @@ data class ReadTextOcrEvent(
                 spokenAmharic = spokenAmharic,
                 amharic = cleanAmharic,
                 english = root.optString("english", ""),
+                oromo = root.optString("oromo").ifEmpty {
+                    root.optString("afaanOromoo", "")
+                }.cleanLabelPrefix(),
                 cleanSpeech = cleanSpeech,
                 isCutOff = root.optBoolean("isCutOff", false),
                 isBlurry = root.optBoolean("isBlurry", false),
