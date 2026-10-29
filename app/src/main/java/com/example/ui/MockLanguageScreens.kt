@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.QuestionAnswer
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -463,16 +464,14 @@ fun EnglishMockScreen(
 
                     val askSubtitle = when {
                         uiState.isRecordingVoice -> "Listening… Auto-submits when you pause"
-                        uiState.activeSessionId != null -> "Ask follow-up or chat"
-                        uiState.lockedImageBase64 != null -> "Ask follow-up or chat"
-                        else -> "AI Companion · Chat about jokes, fun facts & news"
+                        else -> "Visual Q&A · Tap to ask or press Volume−"
                     }
 
                     AyneActionCard(
-                        icon = Icons.Filled.Mic,
+                        icon = Icons.Filled.QuestionAnswer,
                         title = "Ask Question",
                         subtitle = askSubtitle,
-                        contentDescription = "Ask question. AI Companion button",
+                        contentDescription = "Ask question. Tap to ask or press Volume minus.",
                         testTag = "card_ask_question_en",
                         onClick = {
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -910,17 +909,15 @@ fun AfaanOromooMockScreen(
                     )
 
                     val askSubtitle = when {
-                        uiState.isRecordingVoice -> "Dhaggeeffachaa jira… Yeroo dhaabdu ofumaan ergama"
-                        uiState.activeSessionId != null -> "Gaaffii dabalataa gaafadhu"
-                        uiState.lockedImageBase64 != null -> "Gaaffii dabalataa gaafadhu"
-                        else -> "Hiriyyaa AI · Qoosaa, oduu fi waan barbaadde hunda"
+                        uiState.isRecordingVoice -> "Dhaggeeffachaa jira… Dhaabi"
+                        else -> "Gaaffii fi qorannoo · Tuqi ykn Volume− dhiibi"
                     }
 
                     AyneActionCard(
-                        icon = Icons.Filled.Mic,
+                        icon = Icons.Filled.QuestionAnswer,
                         title = "Gaaffii Gaafadhu",
                         subtitle = askSubtitle,
-                        contentDescription = "Gaaffii gaafadhu. Hiriyyaa AI tuqi",
+                        contentDescription = "Gaaffii gaafadhu. Tuqi ykn Volume minus dhiibi",
                         testTag = "card_ask_question_om",
                         onClick = {
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)

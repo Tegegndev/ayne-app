@@ -3,6 +3,7 @@ package com.example
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -124,5 +125,23 @@ class AyneViewModelTest {
         val state = viewModel.uiState.value
         assertEquals(SupportedLanguage.AFAN_OROMOO, state.selectedLanguage)
         assertEquals("om-ayyaantuu", state.customVoice)
+    }
+
+    @Test
+    fun testStandaloneAskQuestionStateAndReset() {
+        val viewModel = AyneViewModel()
+        val context = org.robolectric.RuntimeEnvironment.getApplication()
+        assertFalse(viewModel.uiState.value.isAskQuestionOpen)
+        assertTrue(viewModel.uiState.value.askQuestionHistory.isEmpty())
+
+        viewModel.onAction(context, AyneAction.OpenAskQuestion)
+        assertTrue(viewModel.uiState.value.isAskQuestionOpen)
+
+        viewModel.onAction(context, AyneAction.ClearAskQuestionHistory)
+        assertTrue(viewModel.uiState.value.askQuestionHistory.isEmpty())
+        assertNull(viewModel.uiState.value.askQuestionSessionId)
+
+        viewModel.onAction(context, AyneAction.CloseAskQuestion)
+        assertFalse(viewModel.uiState.value.isAskQuestionOpen)
     }
 }
