@@ -7,6 +7,7 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.util.Base64
+import com.example.data.cleanLabelPrefix
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
@@ -430,11 +431,8 @@ class MirkuzVisionManager(
         } catch (_: Exception) {}
     }
 
-    private fun String.cleanPrefix(): String {
-        return this
-            .replace(Regex("""^\s*\(?\s*(?:አማርኛ|Amharic)\s*\)?\s*:?\s*""", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("""^\s*\(?\s*(?:እንግሊዝኛ|English)\s*\)?\s*:?\s*""", RegexOption.IGNORE_CASE), "")
-            .trim()
+    private fun String.cleanPrefix(preferredLanguage: String? = null): String {
+        return this.cleanLabelPrefix(preferredLanguage)
     }
 }
 

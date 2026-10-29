@@ -183,7 +183,9 @@ class MirkuzVisionRepository(
                             activeSessionId = sid
                         }
 
-                        val amharicText = resObj.optString("amharic").cleanLabelPrefix()
+                        val rawAmharic = resObj.optString("amharic", "")
+                        val rawField = resObj.optString("raw", "")
+                        val amharicText = rawAmharic.cleanLabelPrefix("am").ifEmpty { rawField.cleanLabelPrefix("am") }
                         val audioBase64 = resObj.optJSONObject("audio")?.optString("audioBase64")
 
                         if (!audioBase64.isNullOrEmpty()) {

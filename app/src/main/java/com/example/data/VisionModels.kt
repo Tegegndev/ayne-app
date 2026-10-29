@@ -3,13 +3,123 @@ package com.example.data
 import org.json.JSONObject
 
 /**
- * Removes annoying "(አማርኛ)" and "(Amharic)" label prefixes from backend responses.
+ * Removes label prefixes (e.g. "(አማርኛ)", "(Amharic):", "(English):", "(Oromo):", etc.),
+ * unwraps nested JSON strings (e.g. {"amharic": "...", "english": "..."}, markdown ```json ... ```),
+ * removes raw JSON artifacts, and extracts clean, human-readable speech text for the specified language.
  */
-fun String.cleanLabelPrefix(): String {
-    return this
-        .replace(Regex("^\\s*\\([\\s]*(?:አማርኛ|Amharic)[\\s]*\\)[\\s]*", RegexOption.IGNORE_CASE), "")
-        .replace(Regex("^\\s*(?:አማርኛ|Amharic)\\s*:\\s*", RegexOption.IGNORE_CASE), "")
+fun String.cleanLabelPrefix(preferredLanguage: String? = null): String {
+    if (this.isBlank() || this.trim() == "null") return ""
+
+    var s = this.trim()
+
+    // 1. Strip markdown code blocks if wrapped in ``` or ```json
+    s = s.replace(Regex("^```(?:json)?\\s*", RegexOption.IGNORE_CASE), "")
+        .replace(Regex("\\s*```$"), "")
         .trim()
+
+    // 2. Identify candidate keys for target language
+    val targetKeys = when (preferredLanguage?.lowercase()) {
+        "om", "oromo", "afaan_oromoo" -> listOf("oromo", "afaanOromoo", "cleanSpeech", "speech", "text", "description", "amharic", "english")
+        "en", "english" -> listOf("english", "englishTranslation", "translation", "cleanSpeech", "speech", "text", "description", "amharic", "oromo")
+        "am", "amharic" -> listOf("amharic", "spokenAmharic", "cleanSpeech", "speech", "text", "description", "english", "oromo")
+        else -> listOf("cleanSpeech", "spokenAmharic", "amharic", "oromo", "afaanOromoo", "text", "description", "english", "translation")
+    }
+
+    // 3. Try parsing as full JSONObject
+    if (s.startsWith("{") && s.endsWith("}")) {
+        try {
+            val obj = JSONObject(s)
+            for (key in targetKeys) {
+                if (obj.has(key)) {
+                    val candidate = obj.optText(key)
+                    if (candidate.isNotBlank() && candidate != s) {
+                        val cleaned = candidate.cleanLabelPrefix(preferredLanguage)
+                        if (cleaned.isNotBlank()) return cleaned
+                    }
+                }
+            }
+            // If the JSON object contains no speech keys, return empty
+            return ""
+        } catch (_: Exception) {
+            // Not a strict single JSON object, fall through to regex/partial extraction
+        }
+    }
+
+    // 4. Handle partial / truncated JSON or JSON stubs
+    if (s.contains("{") || s.contains("\":")) {
+        // First check for incomplete / empty key stubs like `{"oromo": "` or `{"amharic": ""`
+        val emptyStubPattern = Regex("""^\{?\s*"(?:oromo|afaanOromoo|amharic|spokenAmharic|english|cleanSpeech|text|description)"\s*:\s*"?\s*\}?$""", RegexOption.IGNORE_CASE)
+        if (emptyStubPattern.matches(s.trim())) {
+            return ""
+        }
+
+        // Regex extraction for candidate keys
+        for (key in targetKeys) {
+            val keyPattern = Regex(""""$key"\s*:\s*"((?:[^"\\]|\\.)*)"""", RegexOption.IGNORE_CASE)
+            val match = keyPattern.find(s)
+            if (match != null) {
+                val rawVal = match.groupValues[1]
+                val unescaped = unescapeJsonString(rawVal)
+                if (unescaped.isNotBlank()) {
+                    val cleaned = unescaped.cleanLabelPrefix(preferredLanguage)
+                    if (cleaned.isNotBlank()) return cleaned
+                }
+            }
+        }
+    }
+
+    // 5. Strip label prefixes like (አማርኛ), (Amharic), (English), (Oromo), etc.
+    s = s
+        .replace(Regex("""^\s*\(?\s*(?:አማርኛ|Amharic)\s*\)?\s*:?\s*""", RegexOption.IGNORE_CASE), "")
+        .replace(Regex("""^\s*\(?\s*(?:እንግሊዝኛ|English)\s*\)?\s*:?\s*""", RegexOption.IGNORE_CASE), "")
+        .replace(Regex("""^\s*\(?\s*(?:Afaan\s*Oromoo|Oromo)\s*\)?\s*:?\s*""", RegexOption.IGNORE_CASE), "")
+        .trim()
+
+    // 6. Clean residual JSON quotes or braces if leftover
+    if (s.startsWith("\"") && s.endsWith("\"") && s.length >= 2) {
+        s = s.substring(1, s.length - 1).trim()
+    }
+    if (s.startsWith("{") && s.endsWith("}") && s.length >= 2) {
+        s = s.substring(1, s.length - 1).trim()
+    }
+
+    return if (s == "null") "" else s
+}
+
+private fun unescapeJsonString(input: String): String {
+    var s = input
+        .replace("\\\"", "\"")
+        .replace("\\\\", "\\")
+        .replace("\\n", "\n")
+        .replace("\\r", "\r")
+        .replace("\\t", "\t")
+
+    if (s.contains("\\u")) {
+        val unicodeRegex = Regex("""\\u([0-9a-fA-F]{4})""")
+        s = unicodeRegex.replace(s) { matchResult ->
+            val codePoint = matchResult.groupValues[1].toInt(16)
+            codePoint.toChar().toString()
+        }
+    }
+    return s
+}
+
+/**
+ * Checks whether any of the supplied text snippets contain raw JSON artifacts
+ * that may interfere with voice generation or TTS.
+ */
+fun hasRawJsonArtifacts(vararg texts: String?): Boolean {
+    return texts.any { text ->
+        if (text.isNullOrBlank()) false
+        else {
+            val t = text.trim()
+            t.startsWith("{") ||
+                t.contains("```json", ignoreCase = true) ||
+                t.contains("\"amharic\":", ignoreCase = true) ||
+                t.contains("\"oromo\":", ignoreCase = true) ||
+                t.contains("\"english\":", ignoreCase = true)
+        }
+    }
 }
 
 /**
@@ -91,6 +201,7 @@ data class VisionDescribeResponse(
                 )
             }
 
+            val rawField = root.optText("raw")
             val rawOromo = root.optText("oromo").ifEmpty {
                 root.optText("afaanOromoo")
             }
@@ -101,13 +212,21 @@ data class VisionDescribeResponse(
                     }
                 }
             }
-            val cleanAmharic = rawAmharic.cleanLabelPrefix()
-            val cleanSpeech = root.optText("cleanSpeech").takeIf { it.isNotEmpty() }?.cleanLabelPrefix()
+            val cleanAmharic = rawAmharic.cleanLabelPrefix("am").ifEmpty {
+                rawField.cleanLabelPrefix("am")
+            }
+            val cleanOromo = rawOromo.cleanLabelPrefix("om").ifEmpty {
+                rawField.cleanLabelPrefix("om")
+            }
             val rawEnglish = root.optText("english").ifEmpty {
                 root.optText("englishTranslation").ifEmpty {
                     root.optText("translation")
                 }
             }
+            val cleanEnglish = rawEnglish.cleanLabelPrefix("en").ifEmpty {
+                rawField.cleanLabelPrefix("en")
+            }
+            val cleanSpeech = root.optText("cleanSpeech").takeIf { it.isNotEmpty() }?.cleanLabelPrefix()
             val sessionId = root.optString("sessionId").ifEmpty { root.optString("chatId") }.takeIf { it.isNotBlank() && it != "null" }
             val sceneType = root.optString("sceneType").takeIf { it.isNotBlank() && it != "null" }
 
@@ -116,11 +235,11 @@ data class VisionDescribeResponse(
                 sessionId = sessionId,
                 transcribedQuery = root.optText("transcribedQuery").takeIf { it.isNotEmpty() },
                 amharic = cleanAmharic,
-                english = rawEnglish,
+                english = cleanEnglish,
                 cleanSpeech = cleanSpeech,
                 audio = audioData,
                 metrics = metrics,
-                oromo = rawOromo,
+                oromo = cleanOromo,
                 sceneType = sceneType
             )
         }
@@ -172,31 +291,40 @@ data class ReadTextResponse(
                 )
             }
 
-            val spokenAmharic = root.optText("spokenAmharic").takeIf { it.isNotEmpty() }?.cleanLabelPrefix()
+            val rawField = root.optText("raw")
+            val spokenAmharic = root.optText("spokenAmharic").takeIf { it.isNotEmpty() }?.cleanLabelPrefix("am")
             val rawAmharic = spokenAmharic ?: root.optText("amharic")
-            val resolvedAmharic = rawAmharic.cleanLabelPrefix()
+            val resolvedAmharic = rawAmharic.cleanLabelPrefix("am").ifEmpty {
+                rawField.cleanLabelPrefix("am")
+            }
             val cleanSpeech = root.optText("cleanSpeech").takeIf { it.isNotEmpty() }?.cleanLabelPrefix()
             val sessionId = root.optString("sessionId").takeIf { it.isNotBlank() && it != "null" }
             val rawOromo = root.optText("oromo").ifEmpty {
                 root.optText("afaanOromoo")
+            }
+            val resolvedOromo = rawOromo.cleanLabelPrefix("om").ifEmpty {
+                rawField.cleanLabelPrefix("om")
+            }
+            val resolvedEnglish = root.optText("english").cleanLabelPrefix("en").ifEmpty {
+                rawField.cleanLabelPrefix("en")
             }
 
             return ReadTextResponse(
                 success = root.optBoolean("success", true),
                 sessionId = sessionId,
                 transcribedQuery = root.optString("transcribedQuery").takeIf { it.isNotEmpty() },
-                signType = root.optString("signType").takeIf { it.isNotEmpty() && it != "null" },
-                documentType = root.optString("documentType").takeIf { it.isNotEmpty() && it != "null" },
-                locationContext = root.optString("locationContext").takeIf { it.isNotEmpty() && it != "null" },
-                extractedText = root.optString("extractedText").takeIf { it.isNotEmpty() && it != "null" },
+                signType = root.optString("signType").takeIf { it.isNotEmpty() && it != "null" }?.cleanLabelPrefix(),
+                documentType = root.optString("documentType").takeIf { it.isNotEmpty() && it != "null" }?.cleanLabelPrefix(),
+                locationContext = root.optString("locationContext").takeIf { it.isNotEmpty() && it != "null" }?.cleanLabelPrefix(),
+                extractedText = root.optString("extractedText").takeIf { it.isNotEmpty() && it != "null" }?.cleanLabelPrefix(),
                 amharic = resolvedAmharic,
-                english = root.optText("english"),
-                oromo = rawOromo.cleanLabelPrefix(),
+                english = resolvedEnglish,
+                oromo = resolvedOromo,
                 cleanSpeech = cleanSpeech,
                 isLegible = root.optBoolean("isLegible", true),
                 isBlurry = root.optBoolean("isBlurry", false),
                 isCutOff = root.optBoolean("isCutOff", false),
-                cameraGuidance = root.optString("cameraGuidance").takeIf { it.isNotEmpty() && it != "null" },
+                cameraGuidance = root.optString("cameraGuidance").takeIf { it.isNotEmpty() && it != "null" }?.cleanLabelPrefix(),
                 audio = audioData,
                 metrics = metrics
             )
@@ -269,29 +397,39 @@ data class ReadTextOcrEvent(
     companion object {
         fun fromJson(jsonStr: String): ReadTextOcrEvent {
             val root = JSONObject(jsonStr)
-            val spokenAmharic = root.optText("spokenAmharic").takeIf { it.isNotEmpty() }?.cleanLabelPrefix()
+            val rawField = root.optText("raw")
+            val spokenAmharic = root.optText("spokenAmharic").takeIf { it.isNotEmpty() }?.cleanLabelPrefix("am")
             val rawAmharic = root.optText("amharic")
-            val cleanAmharic = rawAmharic.cleanLabelPrefix()
+            val cleanAmharic = rawAmharic.cleanLabelPrefix("am").ifEmpty {
+                rawField.cleanLabelPrefix("am")
+            }
             val cleanSpeech = root.optText("cleanSpeech").takeIf { it.isNotEmpty() }?.cleanLabelPrefix()
             val sessionId = root.optString("sessionId").takeIf { it.isNotBlank() && it != "null" }
+            val rawOromo = root.optText("oromo").ifEmpty {
+                root.optText("afaanOromoo")
+            }
+            val cleanOromo = rawOromo.cleanLabelPrefix("om").ifEmpty {
+                rawField.cleanLabelPrefix("om")
+            }
+            val cleanEnglish = root.optText("english").cleanLabelPrefix("en").ifEmpty {
+                rawField.cleanLabelPrefix("en")
+            }
 
             return ReadTextOcrEvent(
                 sessionId = sessionId,
-                signType = root.optString("signType").takeIf { it.isNotEmpty() && it != "null" },
-                documentType = root.optString("documentType").takeIf { it.isNotEmpty() && it != "null" },
-                locationContext = root.optString("locationContext").takeIf { it.isNotEmpty() && it != "null" },
-                extractedText = root.optString("extractedText").takeIf { it.isNotEmpty() && it != "null" },
+                signType = root.optString("signType").takeIf { it.isNotEmpty() && it != "null" }?.cleanLabelPrefix(),
+                documentType = root.optString("documentType").takeIf { it.isNotEmpty() && it != "null" }?.cleanLabelPrefix(),
+                locationContext = root.optString("locationContext").takeIf { it.isNotEmpty() && it != "null" }?.cleanLabelPrefix(),
+                extractedText = root.optString("extractedText").takeIf { it.isNotEmpty() && it != "null" }?.cleanLabelPrefix(),
                 spokenAmharic = spokenAmharic,
                 amharic = cleanAmharic,
-                english = root.optText("english"),
-                oromo = root.optText("oromo").ifEmpty {
-                    root.optText("afaanOromoo")
-                }.cleanLabelPrefix(),
+                english = cleanEnglish,
+                oromo = cleanOromo,
                 cleanSpeech = cleanSpeech,
                 isCutOff = root.optBoolean("isCutOff", false),
                 isBlurry = root.optBoolean("isBlurry", false),
                 isLegible = root.optBoolean("isLegible", true),
-                cameraGuidance = root.optString("cameraGuidance").takeIf { it.isNotEmpty() && it != "null" },
+                cameraGuidance = root.optString("cameraGuidance").takeIf { it.isNotEmpty() && it != "null" }?.cleanLabelPrefix(),
                 ocrLatencyMs = if (root.has("ocrLatencyMs")) root.optLong("ocrLatencyMs") else null
             )
         }
@@ -329,17 +467,28 @@ data class AskQuestionAnswerEvent(
     companion object {
         fun fromJson(jsonStr: String): AskQuestionAnswerEvent {
             val root = JSONObject(jsonStr)
+            val rawField = root.optText("raw")
             val rawAmharic = root.optText("amharic").ifEmpty {
                 root.optText("cleanSpeech").ifEmpty { root.optText("text") }
             }
             val rawOromo = root.optText("oromo").ifEmpty {
                 root.optText("afaanOromoo")
             }
+            val cleanAmharic = rawAmharic.cleanLabelPrefix("am").ifEmpty {
+                rawField.cleanLabelPrefix("am")
+            }
+            val cleanOromo = rawOromo.cleanLabelPrefix("om").ifEmpty {
+                rawField.cleanLabelPrefix("om")
+            }
+            val cleanEnglish = root.optText("english").cleanLabelPrefix("en").ifEmpty {
+                rawField.cleanLabelPrefix("en")
+            }
+
             return AskQuestionAnswerEvent(
                 sessionId = root.optString("sessionId").takeIf { it.isNotBlank() && it != "null" },
-                amharic = rawAmharic.cleanLabelPrefix(),
-                english = root.optText("english"),
-                oromo = rawOromo.cleanLabelPrefix(),
+                amharic = cleanAmharic,
+                english = cleanEnglish,
+                oromo = cleanOromo,
                 language = root.optString("language").takeIf { it.isNotEmpty() },
                 visionLatencyMs = if (root.has("visionLatencyMs")) root.optLong("visionLatencyMs") else null
             )

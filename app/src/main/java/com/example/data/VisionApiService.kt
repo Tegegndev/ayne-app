@@ -220,13 +220,16 @@ class VisionApiService(
                             "vision" -> {
                                 try {
                                     val obj = JSONObject(dataStr)
+                                    val rawField = obj.optText("raw")
                                     val rawAmharic = obj.optText("amharic")
-                                    val amharic = rawAmharic.cleanLabelPrefix()
+                                    val amharic = rawAmharic.cleanLabelPrefix("am").ifEmpty { rawField.cleanLabelPrefix("am") }
                                     val rawOromo = obj.optText("oromo").ifEmpty { obj.optText("afaanOromoo") }
-                                    val english = obj.optText("english")
+                                    val oromo = rawOromo.cleanLabelPrefix("om").ifEmpty { rawField.cleanLabelPrefix("om") }
+                                    val rawEnglish = obj.optText("english")
+                                    val english = rawEnglish.cleanLabelPrefix("en").ifEmpty { rawField.cleanLabelPrefix("en") }
                                     val latency = if (obj.has("visionLatencyMs")) obj.optLong("visionLatencyMs") else null
                                     val sid = obj.optString("sessionId").takeIf { it.isNotBlank() && it != "null" }
-                                    onVision(StreamVisionEvent(amharic = amharic, english = english, oromo = rawOromo, visionLatencyMs = latency, sessionId = sid))
+                                    onVision(StreamVisionEvent(amharic = amharic, english = english, oromo = oromo, visionLatencyMs = latency, sessionId = sid))
                                 } catch (e: Exception) {
                                     // Ignore parse error on malformed chunk
                                 }
@@ -251,14 +254,17 @@ class VisionApiService(
                                 // Fallback: some servers send vision directly without named event
                                 try {
                                     val obj = JSONObject(dataStr)
-                                    if (obj.has("amharic") || obj.has("oromo") || obj.has("english")) {
+                                    if (obj.has("amharic") || obj.has("oromo") || obj.has("english") || obj.has("raw")) {
+                                        val rawField = obj.optText("raw")
                                         val rawAmharic = obj.optText("amharic")
-                                        val amharic = rawAmharic.cleanLabelPrefix()
+                                        val amharic = rawAmharic.cleanLabelPrefix("am").ifEmpty { rawField.cleanLabelPrefix("am") }
                                         val rawOromo = obj.optText("oromo").ifEmpty { obj.optText("afaanOromoo") }
-                                        val english = obj.optText("english")
+                                        val oromo = rawOromo.cleanLabelPrefix("om").ifEmpty { rawField.cleanLabelPrefix("om") }
+                                        val rawEnglish = obj.optText("english")
+                                        val english = rawEnglish.cleanLabelPrefix("en").ifEmpty { rawField.cleanLabelPrefix("en") }
                                         val latency = if (obj.has("visionLatencyMs")) obj.optLong("visionLatencyMs") else null
                                         val sid = obj.optString("sessionId").takeIf { it.isNotBlank() && it != "null" }
-                                        onVision(StreamVisionEvent(amharic = amharic, english = english, oromo = rawOromo, visionLatencyMs = latency, sessionId = sid))
+                                        onVision(StreamVisionEvent(amharic = amharic, english = english, oromo = oromo, visionLatencyMs = latency, sessionId = sid))
                                     }
                                 } catch (e: Exception) {
                                     // Ignore

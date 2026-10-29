@@ -114,6 +114,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewModelScope
 import com.example.data.ConversationTurn
 import com.example.data.cleanLabelPrefix
+import com.example.data.hasRawJsonArtifacts
 import com.example.data.ReadTextResponse
 import com.example.data.VisionApiService
 import com.example.data.VisionDescribeResponse
@@ -742,7 +743,7 @@ class AyneViewModel(
                         SupportedLanguage.ENGLISH -> visionEvent.english.ifBlank { visionEvent.amharic }
                         SupportedLanguage.AFAN_OROMOO -> visionEvent.oromo.ifBlank { visionEvent.amharic.ifBlank { visionEvent.english } }
                         SupportedLanguage.AMHARIC -> visionEvent.amharic.ifBlank { visionEvent.english }
-                    }.cleanLabelPrefix()
+                    }.cleanLabelPrefix(prefLang)
 
                     val initialHistory = listOf(
                         ConversationTurn("user", "Describe my surroundings"),
@@ -783,6 +784,11 @@ class AyneViewModel(
                     if (fullAudio.isNotBlank()) {
                         _uiState.update { it.copy(lastAudioBase64 = fullAudio) }
                         audioPlaybackHelper.setLastConsolidatedAudio(context, fullAudio)
+                    } else {
+                        val answerToSpeak = _uiState.value.lastAnswer
+                        if (!answerToSpeak.isNullOrBlank()) {
+                            synthesizeAndPlayTtsFallback(context, answerToSpeak, _uiState.value)
+                        }
                     }
                 }
             )
@@ -813,7 +819,7 @@ class AyneViewModel(
                         SupportedLanguage.ENGLISH -> response.english.ifBlank { response.amharic }
                         SupportedLanguage.AFAN_OROMOO -> response.oromo.ifBlank { response.cleanSpeech ?: response.english }
                         SupportedLanguage.AMHARIC -> response.amharic.ifBlank { response.english }
-                    }.cleanLabelPrefix()
+                    }.cleanLabelPrefix(prefLang)
 
                     val initialHistory = listOf(
                         ConversationTurn("user", "Describe my surroundings"),
@@ -836,7 +842,10 @@ class AyneViewModel(
                     }
 
                     val rawAudio = response.audio?.audioBase64
-                    if (!rawAudio.isNullOrBlank()) {
+                    val serverHadJson = hasRawJsonArtifacts(response.amharic, response.oromo, response.english, response.cleanSpeech) ||
+                        (response.audio?.durationSeconds != null && response.audio.durationSeconds < 0.6 && chosenAnswer.length > 25)
+
+                    if (!rawAudio.isNullOrBlank() && !serverHadJson) {
                         audioPlaybackHelper.playBase64Audio(
                             context = context,
                             rawBase64Audio = rawAudio,
@@ -844,6 +853,8 @@ class AyneViewModel(
                                 _userMessage.tryEmit("Audio error: $err")
                             }
                         )
+                    } else if (chosenAnswer.isNotBlank()) {
+                        synthesizeAndPlayTtsFallback(context, chosenAnswer, state)
                     }
                 }.onFailure { error ->
                     processingFeedbackHelper?.stopWorkingFeedback()
@@ -963,7 +974,7 @@ class AyneViewModel(
                         SupportedLanguage.ENGLISH -> ansEv.english.ifBlank { ansEv.amharic }
                         SupportedLanguage.AFAN_OROMOO -> ansEv.oromo.ifBlank { ansEv.english.ifBlank { ansEv.amharic } }
                         SupportedLanguage.AMHARIC -> ansEv.amharic.ifBlank { ansEv.english }
-                    }.cleanLabelPrefix()
+                    }.cleanLabelPrefix(prefLang)
 
                     val userTurn = currentTranscribedQuery?.takeIf { it.isNotBlank() } ?: "Voice question"
                     val updatedHistory = (state.conversationHistory + listOf(
@@ -1049,6 +1060,11 @@ class AyneViewModel(
                     if (fullAudio.isNotBlank()) {
                         _uiState.update { it.copy(lastAudioBase64 = fullAudio) }
                         audioPlaybackHelper.setLastConsolidatedAudio(context, fullAudio)
+                    } else {
+                        val answerToSpeak = _uiState.value.lastAnswer
+                        if (!answerToSpeak.isNullOrBlank()) {
+                            synthesizeAndPlayTtsFallback(context, answerToSpeak, _uiState.value)
+                        }
                     }
                 }
             )
@@ -1077,7 +1093,7 @@ class AyneViewModel(
                         SupportedLanguage.ENGLISH -> response.english.ifBlank { response.amharic }
                         SupportedLanguage.AFAN_OROMOO -> response.oromo.ifBlank { response.cleanSpeech ?: response.english }
                         SupportedLanguage.AMHARIC -> response.amharic.ifBlank { response.english }
-                    }.cleanLabelPrefix()
+                    }.cleanLabelPrefix(prefLang)
 
                     val userTurn = response.transcribedQuery?.takeIf { it.isNotBlank() } ?: currentTranscribedQuery ?: "Voice question"
                     val updatedHistory = (state.conversationHistory + listOf(
@@ -1101,7 +1117,10 @@ class AyneViewModel(
                     }
 
                     val rawAudio = response.audio?.audioBase64
-                    if (!rawAudio.isNullOrBlank()) {
+                    val serverHadJson = hasRawJsonArtifacts(response.amharic, response.oromo, response.english, response.cleanSpeech) ||
+                        (response.audio?.durationSeconds != null && response.audio.durationSeconds < 0.6 && chosenAnswer.length > 25)
+
+                    if (!rawAudio.isNullOrBlank() && !serverHadJson) {
                         audioPlaybackHelper.playBase64Audio(
                             context = context,
                             rawBase64Audio = rawAudio,
@@ -1109,6 +1128,8 @@ class AyneViewModel(
                                 _userMessage.tryEmit("Audio error: $err")
                             }
                         )
+                    } else if (chosenAnswer.isNotBlank()) {
+                        synthesizeAndPlayTtsFallback(context, chosenAnswer, state)
                     }
                 }.onFailure { error ->
                     // 3. Fallback to /api/see-and-describe legacy endpoint
@@ -1136,7 +1157,7 @@ class AyneViewModel(
                             SupportedLanguage.ENGLISH -> response.english.ifBlank { response.amharic }
                             SupportedLanguage.AFAN_OROMOO -> response.oromo.ifBlank { response.amharic.ifBlank { response.english } }
                             SupportedLanguage.AMHARIC -> response.amharic.ifBlank { response.english }
-                        }.cleanLabelPrefix()
+                        }.cleanLabelPrefix(prefLang)
 
                         val userTurn = response.transcribedQuery?.takeIf { it.isNotBlank() } ?: currentTranscribedQuery ?: "Voice question"
                         val updatedHistory = (state.conversationHistory + listOf(
@@ -1160,7 +1181,10 @@ class AyneViewModel(
                         }
 
                         val rawAudio = response.audio?.audioBase64
-                        if (!rawAudio.isNullOrBlank()) {
+                        val serverHadJson = hasRawJsonArtifacts(response.amharic, response.oromo, response.english, response.cleanSpeech) ||
+                            (response.audio?.durationSeconds != null && response.audio.durationSeconds < 0.6 && chosenAnswer.length > 25)
+
+                        if (!rawAudio.isNullOrBlank() && !serverHadJson) {
                             audioPlaybackHelper.playBase64Audio(
                                 context = context,
                                 rawBase64Audio = rawAudio,
@@ -1168,6 +1192,8 @@ class AyneViewModel(
                                     _userMessage.tryEmit("Audio error: $err")
                                 }
                             )
+                        } else if (chosenAnswer.isNotBlank()) {
+                            synthesizeAndPlayTtsFallback(context, chosenAnswer, state)
                         }
                     }.onFailure { legacyError ->
                         processingFeedbackHelper?.stopWorkingFeedback()
@@ -1256,7 +1282,7 @@ class AyneViewModel(
                         prefLang == "en" && response.english.isNotBlank() -> response.english
                         prefLang == "om" && response.oromo.isNotBlank() -> response.oromo
                         else -> response.amharic.ifBlank { response.english }
-                    }.cleanLabelPrefix()
+                    }.cleanLabelPrefix(prefLang)
 
                     val guidanceMsg = when {
                         !response.cameraGuidance.isNullOrBlank() -> response.cameraGuidance
@@ -1302,6 +1328,11 @@ class AyneViewModel(
                     if (fullAudio.isNotBlank()) {
                         _uiState.update { it.copy(lastAudioBase64 = fullAudio) }
                         audioPlaybackHelper.setLastConsolidatedAudio(context, fullAudio)
+                    } else {
+                        val answerToSpeak = _uiState.value.lastAnswer
+                        if (!answerToSpeak.isNullOrBlank()) {
+                            synthesizeAndPlayTtsFallback(context, answerToSpeak, _uiState.value)
+                        }
                     }
                 }
             )
@@ -1326,7 +1357,7 @@ class AyneViewModel(
                         prefLang == "en" && response.english.isNotBlank() -> response.english
                         prefLang == "om" && response.oromo.isNotBlank() -> response.oromo
                         else -> response.amharic.ifBlank { response.english }
-                    }.cleanLabelPrefix()
+                    }.cleanLabelPrefix(prefLang)
 
                     val guidanceMsg = when {
                         !response.cameraGuidance.isNullOrBlank() -> response.cameraGuidance
@@ -1352,7 +1383,10 @@ class AyneViewModel(
                     }
 
                     val rawAudio = response.audio?.audioBase64
-                    if (!rawAudio.isNullOrBlank()) {
+                    val serverHadJson = hasRawJsonArtifacts(response.amharic, response.oromo, response.english, response.cleanSpeech) ||
+                        (response.audio?.durationSeconds != null && response.audio.durationSeconds < 0.6 && chosenAnswer.length > 25)
+
+                    if (!rawAudio.isNullOrBlank() && !serverHadJson) {
                         audioPlaybackHelper.playBase64Audio(
                             context = context,
                             rawBase64Audio = rawAudio,
@@ -1360,6 +1394,8 @@ class AyneViewModel(
                                 _userMessage.tryEmit("Audio error: $err")
                             }
                         )
+                    } else if (chosenAnswer.isNotBlank()) {
+                        synthesizeAndPlayTtsFallback(context, chosenAnswer, state)
                     }
                 }.onFailure { error ->
                     processingFeedbackHelper?.stopWorkingFeedback()
@@ -1379,6 +1415,51 @@ class AyneViewModel(
                         busyMessage = null
                     )
                 }
+            }
+        }
+    }
+
+    private fun synthesizeAndPlayTtsFallback(
+        context: Context,
+        text: String,
+        state: AyneUiState
+    ) {
+        val prefLang = when (state.selectedLanguage) {
+            SupportedLanguage.ENGLISH -> "en"
+            SupportedLanguage.AFAN_OROMOO -> "om"
+            SupportedLanguage.AMHARIC -> "am"
+        }
+        val cleanText = text.cleanLabelPrefix(prefLang)
+        if (cleanText.isBlank()) return
+
+        val voice = if (state.selectedLanguage == SupportedLanguage.AFAN_OROMOO && !state.customVoice.startsWith("om-")) {
+            "om-ayyaantuu"
+        } else if (state.selectedLanguage == SupportedLanguage.AMHARIC && state.customVoice.startsWith("om-")) {
+            "am-hamen"
+        } else if (state.selectedLanguage == SupportedLanguage.ENGLISH) {
+            "Zephyr"
+        } else {
+            state.customVoice
+        }
+        val provider = if (prefLang == "en") "gemini" else "addis"
+
+        viewModelScope.launch {
+            val ttsResult = visionApiService.synthesizeTts(
+                baseUrl = state.baseUrl,
+                text = cleanText,
+                customVoice = voice,
+                ttsProvider = provider,
+                language = prefLang
+            )
+            ttsResult.onSuccess { audioBase64 ->
+                _uiState.update { it.copy(lastAudioBase64 = audioBase64) }
+                audioPlaybackHelper.playBase64Audio(
+                    context = context,
+                    rawBase64Audio = audioBase64,
+                    onError = { err ->
+                        _userMessage.tryEmit("Audio error: $err")
+                    }
+                )
             }
         }
     }
