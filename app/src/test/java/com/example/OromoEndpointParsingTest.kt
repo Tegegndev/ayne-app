@@ -95,4 +95,45 @@ class OromoEndpointParsingTest {
         assertEquals("There is still nothing specific visible.", event.english)
         assertEquals("", event.amharic) // must NOT be the literal string "null"
     }
+
+    @Test
+    fun testTargetLanguageOptimizationWithNullEnglishAndAmharic() {
+        val json = """
+            {
+                "success": true,
+                "sessionId": "vis_sess_om_fast",
+                "cleanSpeech": "Fuuldura kee sa'aatii 12 irratti balbalatu mul'ata.",
+                "oromo": "Fuuldura kee sa'aatii 12 irratti balbalatu mul'ata.",
+                "amharic": null,
+                "english": null
+            }
+        """.trimIndent()
+
+        val response = VisionDescribeResponse.fromJson(json)
+        assertEquals("vis_sess_om_fast", response.sessionId)
+        assertEquals("Fuuldura kee sa'aatii 12 irratti balbalatu mul'ata.", response.cleanSpeech)
+        assertEquals("Fuuldura kee sa'aatii 12 irratti balbalatu mul'ata.", response.oromo)
+        assertEquals("", response.english)
+    }
+
+    @Test
+    fun testAmharicModeWithNullEnglishAndOromo() {
+        val json = """
+            {
+                "success": true,
+                "sessionId": "vis_sess_am_fast",
+                "cleanSpeech": "ከፊት ለፊትዎ በር ይታያል።",
+                "amharic": "ከፊት ለፊትዎ በር ይታያል።",
+                "oromo": null,
+                "english": null
+            }
+        """.trimIndent()
+
+        val response = VisionDescribeResponse.fromJson(json)
+        assertEquals("vis_sess_am_fast", response.sessionId)
+        assertEquals("ከፊት ለፊትዎ በር ይታያል።", response.cleanSpeech)
+        assertEquals("ከፊት ለፊትዎ በር ይታያል።", response.amharic)
+        assertEquals("", response.english)
+        assertEquals("", response.oromo)
+    }
 }

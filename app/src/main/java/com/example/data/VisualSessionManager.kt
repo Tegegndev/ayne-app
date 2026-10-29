@@ -150,9 +150,12 @@ class VisualSessionManager(
                         activeSessionId = sid
                     }
 
+                    val rawCleanSpeech = json.optString("cleanSpeech", "")
                     val rawAmharic = json.optString("amharic", "")
                     val rawField = json.optString("raw", "")
-                    val amharic = rawAmharic.cleanLabelPrefix("am").ifEmpty { rawField.cleanLabelPrefix("am") }
+                    val amharic = rawCleanSpeech.cleanLabelPrefix("am").ifEmpty {
+                        rawAmharic.cleanLabelPrefix("am").ifEmpty { rawField.cleanLabelPrefix("am") }
+                    }
                     val transcribed = json.optString("transcribedQuery", "").takeIf { it.isNotBlank() }
                     val audioBase64 = json.optJSONObject("audio")?.optString("audioBase64")
 

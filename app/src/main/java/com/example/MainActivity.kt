@@ -704,11 +704,21 @@ class AyneViewModel(
         processingFeedbackHelper?.startWorkingFeedback(viewModelScope)
 
         viewModelScope.launch {
-            val endpoint = state.apiEndpoint
             val prefLang = when (state.selectedLanguage) {
                 SupportedLanguage.ENGLISH -> "en"
                 SupportedLanguage.AFAN_OROMOO -> "om"
                 SupportedLanguage.AMHARIC -> "am"
+            }
+            val endpoint = if (prefLang == "om") {
+                if (state.apiEndpoint.endsWith("/see-and-describe")) {
+                    "${state.apiEndpoint}/om"
+                } else if (state.apiEndpoint.endsWith("/om")) {
+                    state.apiEndpoint
+                } else {
+                    "${state.baseUrl.trimEnd('/')}/api/see-and-describe/om"
+                }
+            } else {
+                state.apiEndpoint
             }
             val voice = if (state.selectedLanguage == SupportedLanguage.AFAN_OROMOO && !state.customVoice.startsWith("om-")) {
                 "om-ayyaantuu"
@@ -739,10 +749,12 @@ class AyneViewModel(
                     if (!visionEvent.sessionId.isNullOrBlank()) {
                         activeSessionId = visionEvent.sessionId
                     }
-                    val chosenAnswer = when (state.selectedLanguage) {
-                        SupportedLanguage.ENGLISH -> visionEvent.english.ifBlank { visionEvent.amharic }
-                        SupportedLanguage.AFAN_OROMOO -> visionEvent.oromo.ifBlank { visionEvent.amharic.ifBlank { visionEvent.english } }
-                        SupportedLanguage.AMHARIC -> visionEvent.amharic.ifBlank { visionEvent.english }
+                    val chosenAnswer = visionEvent.cleanSpeech.ifBlank {
+                        when (state.selectedLanguage) {
+                            SupportedLanguage.ENGLISH -> visionEvent.english.ifBlank { visionEvent.amharic }
+                            SupportedLanguage.AFAN_OROMOO -> visionEvent.oromo.ifBlank { visionEvent.english }
+                            SupportedLanguage.AMHARIC -> visionEvent.amharic.ifBlank { visionEvent.english }
+                        }
                     }.cleanLabelPrefix(prefLang)
 
                     val initialHistory = listOf(
@@ -815,10 +827,12 @@ class AyneViewModel(
                     if (!response.sessionId.isNullOrBlank()) {
                         activeSessionId = response.sessionId
                     }
-                    val chosenAnswer = when (state.selectedLanguage) {
-                        SupportedLanguage.ENGLISH -> response.english.ifBlank { response.amharic }
-                        SupportedLanguage.AFAN_OROMOO -> response.oromo.ifBlank { response.cleanSpeech ?: response.english }
-                        SupportedLanguage.AMHARIC -> response.amharic.ifBlank { response.english }
+                    val chosenAnswer = response.cleanSpeech.ifBlank {
+                        when (state.selectedLanguage) {
+                            SupportedLanguage.ENGLISH -> response.english.ifBlank { response.amharic }
+                            SupportedLanguage.AFAN_OROMOO -> response.oromo.ifBlank { response.english }
+                            SupportedLanguage.AMHARIC -> response.amharic.ifBlank { response.english }
+                        }
                     }.cleanLabelPrefix(prefLang)
 
                     val initialHistory = listOf(
@@ -970,10 +984,12 @@ class AyneViewModel(
                     if (!ansEv.sessionId.isNullOrBlank()) {
                         activeSessionId = ansEv.sessionId
                     }
-                    val chosenAnswer = when (state.selectedLanguage) {
-                        SupportedLanguage.ENGLISH -> ansEv.english.ifBlank { ansEv.amharic }
-                        SupportedLanguage.AFAN_OROMOO -> ansEv.oromo.ifBlank { ansEv.english.ifBlank { ansEv.amharic } }
-                        SupportedLanguage.AMHARIC -> ansEv.amharic.ifBlank { ansEv.english }
+                    val chosenAnswer = ansEv.cleanSpeech.ifBlank {
+                        when (state.selectedLanguage) {
+                            SupportedLanguage.ENGLISH -> ansEv.english.ifBlank { ansEv.amharic }
+                            SupportedLanguage.AFAN_OROMOO -> ansEv.oromo.ifBlank { ansEv.english }
+                            SupportedLanguage.AMHARIC -> ansEv.amharic.ifBlank { ansEv.english }
+                        }
                     }.cleanLabelPrefix(prefLang)
 
                     val userTurn = currentTranscribedQuery?.takeIf { it.isNotBlank() } ?: "Voice question"
@@ -1089,10 +1105,12 @@ class AyneViewModel(
                     if (!response.sessionId.isNullOrBlank()) {
                         activeSessionId = response.sessionId
                     }
-                    val chosenAnswer = when (state.selectedLanguage) {
-                        SupportedLanguage.ENGLISH -> response.english.ifBlank { response.amharic }
-                        SupportedLanguage.AFAN_OROMOO -> response.oromo.ifBlank { response.cleanSpeech ?: response.english }
-                        SupportedLanguage.AMHARIC -> response.amharic.ifBlank { response.english }
+                    val chosenAnswer = response.cleanSpeech.ifBlank {
+                        when (state.selectedLanguage) {
+                            SupportedLanguage.ENGLISH -> response.english.ifBlank { response.amharic }
+                            SupportedLanguage.AFAN_OROMOO -> response.oromo.ifBlank { response.english }
+                            SupportedLanguage.AMHARIC -> response.amharic.ifBlank { response.english }
+                        }
                     }.cleanLabelPrefix(prefLang)
 
                     val userTurn = response.transcribedQuery?.takeIf { it.isNotBlank() } ?: currentTranscribedQuery ?: "Voice question"
@@ -1153,10 +1171,12 @@ class AyneViewModel(
                         if (!response.sessionId.isNullOrBlank()) {
                             activeSessionId = response.sessionId
                         }
-                        val chosenAnswer = when (state.selectedLanguage) {
-                            SupportedLanguage.ENGLISH -> response.english.ifBlank { response.amharic }
-                            SupportedLanguage.AFAN_OROMOO -> response.oromo.ifBlank { response.amharic.ifBlank { response.english } }
-                            SupportedLanguage.AMHARIC -> response.amharic.ifBlank { response.english }
+                        val chosenAnswer = response.cleanSpeech.ifBlank {
+                            when (state.selectedLanguage) {
+                                SupportedLanguage.ENGLISH -> response.english.ifBlank { response.amharic }
+                                SupportedLanguage.AFAN_OROMOO -> response.oromo.ifBlank { response.english }
+                                SupportedLanguage.AMHARIC -> response.amharic.ifBlank { response.english }
+                            }
                         }.cleanLabelPrefix(prefLang)
 
                         val userTurn = response.transcribedQuery?.takeIf { it.isNotBlank() } ?: currentTranscribedQuery ?: "Voice question"
@@ -1250,13 +1270,23 @@ class AyneViewModel(
         processingFeedbackHelper?.startWorkingFeedback(viewModelScope)
 
         viewModelScope.launch {
-            val endpoint = state.readTextEndpoint
-            val voice = state.customVoice
             val prefLang = when (state.selectedLanguage) {
                 SupportedLanguage.ENGLISH -> "en"
                 SupportedLanguage.AFAN_OROMOO -> "om"
                 SupportedLanguage.AMHARIC -> "am"
             }
+            val endpoint = if (prefLang == "om") {
+                if (state.readTextEndpoint.endsWith("/read-text") || state.readTextEndpoint.endsWith("/read-text-and-signs")) {
+                    "${state.readTextEndpoint}/om"
+                } else if (state.readTextEndpoint.endsWith("/om")) {
+                    state.readTextEndpoint
+                } else {
+                    "${state.baseUrl.trimEnd('/')}/api/read-text/om"
+                }
+            } else {
+                state.readTextEndpoint
+            }
+            val voice = state.customVoice
             val ttsProvider = if (prefLang == "en") "gemini" else "addis"
 
             var receivedOcr = false
@@ -1278,10 +1308,12 @@ class AyneViewModel(
                     processingFeedbackHelper?.playSuccessTone()
 
                     val response = ocrEvent.toReadTextResponse()
-                    val chosenAnswer = when {
-                        prefLang == "en" && response.english.isNotBlank() -> response.english
-                        prefLang == "om" && response.oromo.isNotBlank() -> response.oromo
-                        else -> response.amharic.ifBlank { response.english }
+                    val chosenAnswer = response.cleanSpeech.ifBlank {
+                        when {
+                            prefLang == "en" && response.english.isNotBlank() -> response.english
+                            prefLang == "om" && response.oromo.isNotBlank() -> response.oromo
+                            else -> response.amharic.ifBlank { response.english }
+                        }
                     }.cleanLabelPrefix(prefLang)
 
                     val guidanceMsg = when {
@@ -1353,10 +1385,12 @@ class AyneViewModel(
                 singleResult.onSuccess { response ->
                     processingFeedbackHelper?.stopWorkingFeedback()
                     processingFeedbackHelper?.playSuccessTone()
-                    val chosenAnswer = when {
-                        prefLang == "en" && response.english.isNotBlank() -> response.english
-                        prefLang == "om" && response.oromo.isNotBlank() -> response.oromo
-                        else -> response.amharic.ifBlank { response.english }
+                    val chosenAnswer = response.cleanSpeech.ifBlank {
+                        when {
+                            prefLang == "en" && response.english.isNotBlank() -> response.english
+                            prefLang == "om" && response.oromo.isNotBlank() -> response.oromo
+                            else -> response.amharic.ifBlank { response.english }
+                        }
                     }.cleanLabelPrefix(prefLang)
 
                     val guidanceMsg = when {

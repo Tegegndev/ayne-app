@@ -255,8 +255,14 @@ class MirkuzVisionManager(
             put("includeAudio", true)
         }
 
+        val requestUrl = if (preferredLanguage == "om") {
+            "${serverBaseUrl.trimEnd('/')}/api/see-and-describe/om"
+        } else {
+            "${serverBaseUrl.trimEnd('/')}/api/see-and-describe"
+        }
+
         val request = Request.Builder()
-            .url("${serverBaseUrl.trimEnd('/')}/api/see-and-describe")
+            .url(requestUrl)
             .header("Content-Type", "application/json")
             .post(payload.toString().toRequestBody("application/json".toMediaType()))
             .build()
@@ -283,7 +289,7 @@ class MirkuzVisionManager(
                                 }
                             }
                         }
-                        val amharicSpeech = amharicRaw.cleanPrefix()
+                        val amharicSpeech = amharicRaw.cleanPrefix(preferredLanguage)
                         val englishReasoning = json.optString("english").ifEmpty {
                             json.optString("englishTranslation").ifEmpty {
                                 json.optString("translation", "")
@@ -350,8 +356,14 @@ class MirkuzVisionManager(
             put("includeAudio", true)
         }
 
+        val requestUrl = if (preferredLanguage == "om") {
+            "${serverBaseUrl.trimEnd('/')}/api/see-and-describe/om"
+        } else {
+            "${serverBaseUrl.trimEnd('/')}/api/see-and-describe"
+        }
+
         val request = Request.Builder()
-            .url("${serverBaseUrl.trimEnd('/')}/api/see-and-describe")
+            .url(requestUrl)
             .header("Content-Type", "application/json")
             .post(payload.toString().toRequestBody("application/json".toMediaType()))
             .build()
@@ -377,7 +389,7 @@ class MirkuzVisionManager(
                                 }
                             }
                         }
-                        val amharicSpeech = amharicRaw.cleanPrefix()
+                        val amharicSpeech = amharicRaw.cleanPrefix(preferredLanguage)
                         val englishReasoning = json.optString("english").ifEmpty {
                             json.optString("englishTranslation").ifEmpty {
                                 json.optString("translation", "")

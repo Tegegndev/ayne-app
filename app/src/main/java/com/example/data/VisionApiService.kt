@@ -86,8 +86,20 @@ class VisionApiService(
             val mediaType = "application/json; charset=utf-8".toMediaType()
             val requestBody = jsonPayload.toString().toRequestBody(mediaType)
 
+            val targetUrl = if (preferredLanguage == "om") {
+                if (endpointUrl.endsWith("/see-and-describe")) {
+                    "${endpointUrl}/om"
+                } else if (endpointUrl.endsWith("/see-and-describe/om")) {
+                    endpointUrl
+                } else {
+                    endpointUrl
+                }
+            } else {
+                endpointUrl
+            }
+
             val request = Request.Builder()
-                .url(endpointUrl)
+                .url(targetUrl)
                 .post(requestBody)
                 .addHeader("Content-Type", "application/json")
                 .addHeader("Accept", "application/json")
@@ -132,12 +144,24 @@ class VisionApiService(
         onDone: () -> Unit
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            val streamUrl = if (baseEndpointUrl.endsWith("/stream")) {
-                baseEndpointUrl
-            } else if (baseEndpointUrl.endsWith("/see-and-describe")) {
-                "$baseEndpointUrl/stream"
+            val streamUrl = if (preferredLanguage == "om") {
+                if (baseEndpointUrl.endsWith("/stream")) {
+                    baseEndpointUrl
+                } else if (baseEndpointUrl.endsWith("/see-and-describe/om")) {
+                    "$baseEndpointUrl/stream"
+                } else if (baseEndpointUrl.endsWith("/see-and-describe")) {
+                    baseEndpointUrl.replace("see-and-describe", "see-and-describe/om") + "/stream"
+                } else {
+                    "${baseEndpointUrl.trimEnd('/')}/api/see-and-describe/om/stream"
+                }
             } else {
-                "${baseEndpointUrl.trimEnd('/')}/api/see-and-describe/stream"
+                if (baseEndpointUrl.endsWith("/stream")) {
+                    baseEndpointUrl
+                } else if (baseEndpointUrl.endsWith("/see-and-describe")) {
+                    "$baseEndpointUrl/stream"
+                } else {
+                    "${baseEndpointUrl.trimEnd('/')}/api/see-and-describe/stream"
+                }
             }
 
             val jsonPayload = JSONObject().apply {
@@ -227,9 +251,13 @@ class VisionApiService(
                                     val oromo = rawOromo.cleanLabelPrefix("om").ifEmpty { rawField.cleanLabelPrefix("om") }
                                     val rawEnglish = obj.optText("english")
                                     val english = rawEnglish.cleanLabelPrefix("en").ifEmpty { rawField.cleanLabelPrefix("en") }
+                                    val rawCleanSpeech = obj.optText("cleanSpeech")
+                                    val cleanSpeech = rawCleanSpeech.cleanLabelPrefix().ifEmpty {
+                                        oromo.ifEmpty { amharic.ifEmpty { english } }
+                                    }
                                     val latency = if (obj.has("visionLatencyMs")) obj.optLong("visionLatencyMs") else null
                                     val sid = obj.optString("sessionId").takeIf { it.isNotBlank() && it != "null" }
-                                    onVision(StreamVisionEvent(amharic = amharic, english = english, oromo = oromo, visionLatencyMs = latency, sessionId = sid))
+                                    onVision(StreamVisionEvent(amharic = amharic, english = english, oromo = oromo, visionLatencyMs = latency, sessionId = sid, cleanSpeech = cleanSpeech))
                                 } catch (e: Exception) {
                                     // Ignore parse error on malformed chunk
                                 }
@@ -254,7 +282,7 @@ class VisionApiService(
                                 // Fallback: some servers send vision directly without named event
                                 try {
                                     val obj = JSONObject(dataStr)
-                                    if (obj.has("amharic") || obj.has("oromo") || obj.has("english") || obj.has("raw")) {
+                                    if (obj.has("amharic") || obj.has("oromo") || obj.has("english") || obj.has("raw") || obj.has("cleanSpeech")) {
                                         val rawField = obj.optText("raw")
                                         val rawAmharic = obj.optText("amharic")
                                         val amharic = rawAmharic.cleanLabelPrefix("am").ifEmpty { rawField.cleanLabelPrefix("am") }
@@ -262,9 +290,13 @@ class VisionApiService(
                                         val oromo = rawOromo.cleanLabelPrefix("om").ifEmpty { rawField.cleanLabelPrefix("om") }
                                         val rawEnglish = obj.optText("english")
                                         val english = rawEnglish.cleanLabelPrefix("en").ifEmpty { rawField.cleanLabelPrefix("en") }
+                                        val rawCleanSpeech = obj.optText("cleanSpeech")
+                                        val cleanSpeech = rawCleanSpeech.cleanLabelPrefix().ifEmpty {
+                                            oromo.ifEmpty { amharic.ifEmpty { english } }
+                                        }
                                         val latency = if (obj.has("visionLatencyMs")) obj.optLong("visionLatencyMs") else null
                                         val sid = obj.optString("sessionId").takeIf { it.isNotBlank() && it != "null" }
-                                        onVision(StreamVisionEvent(amharic = amharic, english = english, oromo = oromo, visionLatencyMs = latency, sessionId = sid))
+                                        onVision(StreamVisionEvent(amharic = amharic, english = english, oromo = oromo, visionLatencyMs = latency, sessionId = sid, cleanSpeech = cleanSpeech))
                                     }
                                 } catch (e: Exception) {
                                     // Ignore
@@ -313,8 +345,20 @@ class VisionApiService(
             val mediaType = "application/json; charset=utf-8".toMediaType()
             val requestBody = jsonPayload.toString().toRequestBody(mediaType)
 
+            val targetUrl = if (preferredLanguage == "om") {
+                if (endpointUrl.endsWith("/read-text") || endpointUrl.endsWith("/read-text-and-signs")) {
+                    "${endpointUrl}/om"
+                } else if (endpointUrl.endsWith("/read-text/om")) {
+                    endpointUrl
+                } else {
+                    endpointUrl
+                }
+            } else {
+                endpointUrl
+            }
+
             val request = Request.Builder()
-                .url(endpointUrl)
+                .url(targetUrl)
                 .post(requestBody)
                 .addHeader("Content-Type", "application/json")
                 .addHeader("Accept", "application/json")
@@ -357,12 +401,24 @@ class VisionApiService(
         onDone: () -> Unit
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            val streamUrl = if (baseEndpointUrl.endsWith("/stream")) {
-                baseEndpointUrl
-            } else if (baseEndpointUrl.endsWith("/read-text") || baseEndpointUrl.endsWith("/read-text-and-signs")) {
-                "$baseEndpointUrl/stream"
+            val streamUrl = if (preferredLanguage == "om") {
+                if (baseEndpointUrl.endsWith("/stream")) {
+                    baseEndpointUrl
+                } else if (baseEndpointUrl.endsWith("/read-text/om")) {
+                    "$baseEndpointUrl/stream"
+                } else if (baseEndpointUrl.endsWith("/read-text") || baseEndpointUrl.endsWith("/read-text-and-signs")) {
+                    baseEndpointUrl.replace(Regex("/read-text(-and-signs)?"), "/read-text/om") + "/stream"
+                } else {
+                    "${baseEndpointUrl.trimEnd('/')}/api/read-text/om/stream"
+                }
             } else {
-                "${baseEndpointUrl.trimEnd('/')}/api/read-text/stream"
+                if (baseEndpointUrl.endsWith("/stream")) {
+                    baseEndpointUrl
+                } else if (baseEndpointUrl.endsWith("/read-text") || baseEndpointUrl.endsWith("/read-text-and-signs")) {
+                    "$baseEndpointUrl/stream"
+                } else {
+                    "${baseEndpointUrl.trimEnd('/')}/api/read-text/stream"
+                }
             }
 
             val jsonPayload = JSONObject().apply {
