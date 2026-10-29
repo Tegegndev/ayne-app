@@ -134,7 +134,7 @@ class AyneViewModelTest {
         assertFalse(viewModel.uiState.value.isAskQuestionOpen)
         assertTrue(viewModel.uiState.value.askQuestionHistory.isEmpty())
 
-        viewModel.onAction(context, AyneAction.OpenAskQuestion)
+        viewModel.onAction(context, AyneAction.OpenAskQuestion())
         assertTrue(viewModel.uiState.value.isAskQuestionOpen)
 
         viewModel.onAction(context, AyneAction.ClearAskQuestionHistory)

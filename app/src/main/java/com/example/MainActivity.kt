@@ -278,7 +278,7 @@ sealed interface AyneAction {
     data object ClearSession : AyneAction
     data object DismissResult : AyneAction
     data object AskQuestion : AyneAction
-    data object OpenAskQuestion : AyneAction
+    data class OpenAskQuestion(val frameBase64: String? = null) : AyneAction
     data object CloseAskQuestion : AyneAction
     data class SubmitAskQuestion(val query: String) : AyneAction
     data object ClearAskQuestionHistory : AyneAction
@@ -414,17 +414,19 @@ class AyneViewModel(
         processingFeedbackHelper?.playInstantTapEarcon()
     }
 
-    fun enterCompanionMode(context: Context) {
+    fun openAskQuestion(context: Context, capturedFrame: String? = null) {
         bargeIn()
         val greeting = when (_uiState.value.selectedLanguage) {
-            SupportedLanguage.ENGLISH -> context.getString(R.string.companion_greeting_english)
-            SupportedLanguage.AFAN_OROMOO -> context.getString(R.string.companion_greeting_oromo)
-            SupportedLanguage.AMHARIC -> context.getString(R.string.companion_greeting_amharic)
+            SupportedLanguage.ENGLISH -> "Hello! How can I help you? Please ask your question, I am listening."
+            SupportedLanguage.AFAN_OROMOO -> "Akkam! Maal si gargaaru? Gaaffii kee gaafadhu, sin dhaggeeffadha."
+            SupportedLanguage.AMHARIC -> "ሰላም! ምን ልርዳዎት? ጥያቄዎን ይጠይቁ፤ እየሰማሁ ነው።"
         }
         _uiState.update {
             it.copy(
                 isCompanionMode = true,
                 isAskQuestionOpen = true,
+                lockedImageBase64 = capturedFrame ?: it.lockedImageBase64,
+                lastCapturedBase64 = capturedFrame ?: it.lastCapturedBase64,
                 companionGreeting = greeting,
                 lastAnswer = greeting,
                 lastEnglishAnswer = if (it.selectedLanguage == SupportedLanguage.ENGLISH) greeting else null,
@@ -433,6 +435,12 @@ class AyneViewModel(
         }
         processingFeedbackHelper?.playSuccessTone()
         _userMessage.tryEmit(greeting)
+        synthesizeAndPlayTtsFallback(context, greeting, _uiState.value)
+        startVoiceRecording(context)
+    }
+
+    fun enterCompanionMode(context: Context, capturedFrame: String? = null) {
+        openAskQuestion(context, capturedFrame)
     }
 
     fun exitCompanionMode() {
@@ -507,15 +515,25 @@ class AyneViewModel(
 
                 if (hasSpoken) {
                     stopAndSubmitVoiceRecording(context)
+                } else if (_uiState.value.isAskQuestionOpen) {
+                    cancelVoiceRecording()
+                    val prompt = when (_uiState.value.selectedLanguage) {
+                        SupportedLanguage.ENGLISH -> "I didn't hear your question, please tap the mic to speak."
+                        SupportedLanguage.AFAN_OROMOO -> "Gaaffii kee hin dhageenye, maaloo irra deebi'ii dubbadhu."
+                        SupportedLanguage.AMHARIC -> "ጥያቄዎን አልሰማሁም፤ እባክዎ ማይክሮፎኑን ተጭነው እንደገና ይናገሩ።"
+                    }
+                    _userMessage.tryEmit(prompt)
                 } else {
-                    // Silence fallback: no speech detected → stop mic, describe current view
+                    // Silence fallback: no speech detected in vision mode → stop mic, describe current view
                     cancelVoiceRecording()
                     submitSilenceFallback(context)
                 }
             }
         } else {
-            // Recording init failed (e.g. emulator without mic) → describe surroundings
-            viewModelScope.launch { submitSilenceFallback(context) }
+            if (!_uiState.value.isAskQuestionOpen) {
+                // Recording init failed (e.g. emulator without mic) → describe surroundings
+                viewModelScope.launch { submitSilenceFallback(context) }
+            }
         }
     }
 
@@ -652,8 +670,11 @@ class AyneViewModel(
                     startVoiceRecording(context)
                 }
             }
-            is AyneAction.OpenAskQuestion, is AyneAction.EnterCompanionMode -> {
-                enterCompanionMode(context)
+            is AyneAction.OpenAskQuestion -> {
+                openAskQuestion(context, action.frameBase64)
+            }
+            is AyneAction.EnterCompanionMode -> {
+                openAskQuestion(context)
             }
             is AyneAction.CloseAskQuestion, is AyneAction.ExitCompanionMode -> {
                 exitCompanionMode()
@@ -1772,11 +1793,16 @@ fun AyneAppScreen(
             viewModel.stopAndSubmitVoiceRecording(context)
         } else {
             viewModel.bargeIn()
-            if (!uiState.isCompanionMode && !uiState.isAskQuestionOpen) {
-                viewModel.onAction(context, AyneAction.OpenAskQuestion)
-            }
+            viewModel.playTapEarcon()
             requireMicPermission {
-                viewModel.startVoiceRecording(context)
+                coroutineScope.launch {
+                    val frame = try {
+                        CameraCaptureHelper.captureFrame(context, imageCapture)
+                    } catch (_: Throwable) {
+                        null
+                    }
+                    viewModel.openAskQuestion(context, frame)
+                }
             }
         }
     }
@@ -2812,104 +2838,150 @@ fun AyneAskQuestionPanel(
                 .background(AyneDarkCard)
                 .padding(8.dp)
         ) {
-            if (uiState.askQuestionHistory.isEmpty() && uiState.liveTranscription.isNullOrBlank()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(16.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = when (uiState.selectedLanguage) {
-                            SupportedLanguage.ENGLISH -> "Tap the microphone below to ask your question, or type below."
-                            SupportedLanguage.AFAN_OROMOO -> "Sagaleen gaafachuuf maaykirofoonii tuqi ykn barreessi."
-                            SupportedLanguage.AMHARIC -> "በድምፅ ለመጠየቅ ከታች ያለውን ማይክሮፎን ይጫኑ ወይም በጽሑፍ ይጠይቁ።"
-                        },
-                        color = AynePureWhite.copy(alpha = 0.75f),
-                        fontSize = 14.sp,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
-                }
-            } else {
-                LazyColumn(
-                    state = listState,
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxSize()
-                ) {
-                    items(uiState.askQuestionHistory) { turn ->
-                        if (turn.role == "user") {
-                            // User Question Bubble (Right)
+            LazyColumn(
+                state = listState,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                // Initial welcoming greeting from Assistant
+                item {
+                    val greetingText = uiState.companionGreeting ?: when (uiState.selectedLanguage) {
+                        SupportedLanguage.ENGLISH -> "Hello! How can I help you? Please ask your question, I am listening."
+                        SupportedLanguage.AFAN_OROMOO -> "Akkam! Maal si gargaaru? Gaaffii kee gaafadhu, sin dhaggeeffadha."
+                        SupportedLanguage.AMHARIC -> "ሰላም! ምን ልርዳዎት? ጥያቄዎን ይጠይቁ፤ እየሰማሁ ነው።"
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Start
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(topStart = 4.dp, topEnd = 14.dp, bottomStart = 14.dp, bottomEnd = 14.dp),
+                            color = AynePureBlack,
+                            border = BorderStroke(1.dp, AyneVibrantYellow.copy(alpha = 0.8f)),
+                            modifier = Modifier.widthIn(max = 300.dp)
+                        ) {
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.End
+                                modifier = Modifier.padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Surface(
-                                    shape = RoundedCornerShape(topStart = 14.dp, topEnd = 4.dp, bottomStart = 14.dp, bottomEnd = 14.dp),
-                                    color = AyneVibrantYellow,
-                                    modifier = Modifier.widthIn(max = 280.dp)
+                                Text(
+                                    text = greetingText,
+                                    color = AynePureWhite,
+                                    fontSize = 14.sp,
+                                    lineHeight = 20.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                IconButton(
+                                    onClick = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        onAction(AyneAction.RepeatLastAnswer)
+                                    },
+                                    modifier = Modifier.size(28.dp)
                                 ) {
-                                    Text(
-                                        text = turn.text,
-                                        color = AyneOnYellow,
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        modifier = Modifier.padding(10.dp)
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+                                        contentDescription = "Repeat",
+                                        tint = AyneVibrantYellow,
+                                        modifier = Modifier.size(16.dp)
                                     )
                                 }
                             }
-                        } else {
-                            // AI Answer Bubble (Left)
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.Start
+                        }
+                    }
+                }
+
+                items(uiState.askQuestionHistory) { turn ->
+                    if (turn.role == "user") {
+                        // User Question Bubble (Right)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(topStart = 14.dp, topEnd = 4.dp, bottomStart = 14.dp, bottomEnd = 14.dp),
+                                color = AyneVibrantYellow,
+                                modifier = Modifier.widthIn(max = 280.dp)
                             ) {
-                                Surface(
-                                    shape = RoundedCornerShape(topStart = 4.dp, topEnd = 14.dp, bottomStart = 14.dp, bottomEnd = 14.dp),
-                                    color = AynePureBlack,
-                                    border = BorderStroke(1.dp, AyneVibrantYellow.copy(alpha = 0.8f)),
-                                    modifier = Modifier.widthIn(max = 300.dp)
+                                Text(
+                                    text = turn.text,
+                                    color = AyneOnYellow,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.padding(10.dp)
+                                )
+                            }
+                        }
+                    } else {
+                        // AI Answer Bubble (Left)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Start
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(topStart = 4.dp, topEnd = 14.dp, bottomStart = 14.dp, bottomEnd = 14.dp),
+                                color = AynePureBlack,
+                                border = BorderStroke(1.dp, AyneVibrantYellow.copy(alpha = 0.8f)),
+                                modifier = Modifier.widthIn(max = 300.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Column(modifier = Modifier.padding(10.dp)) {
-                                        Text(
-                                            text = turn.text,
-                                            color = AynePureWhite,
-                                            fontSize = 14.sp,
-                                            lineHeight = 20.sp,
-                                            fontWeight = FontWeight.Normal
+                                    Text(
+                                        text = turn.text,
+                                        color = AynePureWhite,
+                                        fontSize = 14.sp,
+                                        lineHeight = 20.sp,
+                                        fontWeight = FontWeight.Normal,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    IconButton(
+                                        onClick = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            onAction(AyneAction.RepeatLastAnswer)
+                                        },
+                                        modifier = Modifier.size(28.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+                                            contentDescription = "Repeat",
+                                            tint = AyneVibrantYellow,
+                                            modifier = Modifier.size(16.dp)
                                         )
                                     }
                                 }
                             }
                         }
                     }
+                }
 
-                    // Live Speech Transcription
-                    if (!uiState.liveTranscription.isNullOrBlank() && uiState.isRecordingVoice) {
-                        item {
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = AynePureBlack,
-                                border = BorderStroke(1.dp, AyneVibrantYellow),
-                                modifier = Modifier.fillMaxWidth()
+                // Live Speech Transcription
+                if (!uiState.liveTranscription.isNullOrBlank() && uiState.isRecordingVoice) {
+                    item {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = AynePureBlack,
+                            border = BorderStroke(1.dp, AyneVibrantYellow),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(
-                                    modifier = Modifier.padding(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.Mic,
-                                        contentDescription = null,
-                                        tint = AyneVibrantYellow,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = uiState.liveTranscription ?: "",
-                                        color = AyneVibrantYellow,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
+                                Icon(
+                                    imageVector = Icons.Filled.Mic,
+                                    contentDescription = null,
+                                    tint = AyneVibrantYellow,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = uiState.liveTranscription ?: "",
+                                    color = AyneVibrantYellow,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
                             }
                         }
                     }
