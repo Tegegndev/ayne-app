@@ -255,10 +255,10 @@ class MirkuzVisionManager(
             put("includeAudio", true)
         }
 
-        val requestUrl = if (preferredLanguage == "om") {
-            "${serverBaseUrl.trimEnd('/')}/api/see-and-describe/om"
-        } else {
-            "${serverBaseUrl.trimEnd('/')}/api/see-and-describe"
+        val requestUrl = when (preferredLanguage) {
+            "om" -> "${serverBaseUrl.trimEnd('/')}/api/see-and-describe/om"
+            "am" -> "${serverBaseUrl.trimEnd('/')}/api/see-and-describe/am"
+            else -> "${serverBaseUrl.trimEnd('/')}/api/see-and-describe"
         }
 
         val request = Request.Builder()
@@ -356,10 +356,10 @@ class MirkuzVisionManager(
             put("includeAudio", true)
         }
 
-        val requestUrl = if (preferredLanguage == "om") {
-            "${serverBaseUrl.trimEnd('/')}/api/see-and-describe/om"
-        } else {
-            "${serverBaseUrl.trimEnd('/')}/api/see-and-describe"
+        val requestUrl = when (preferredLanguage) {
+            "om" -> "${serverBaseUrl.trimEnd('/')}/api/see-and-describe/om"
+            "am" -> "${serverBaseUrl.trimEnd('/')}/api/see-and-describe/am"
+            else -> "${serverBaseUrl.trimEnd('/')}/api/see-and-describe"
         }
 
         val request = Request.Builder()

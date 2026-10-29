@@ -85,6 +85,12 @@ class AskQuestionStreamTest {
         assertEquals("https://my-custom-vision.app/api/see-and-describe", AyneUiState.buildVisionUrl(customBase))
         assertEquals("https://my-custom-vision.app/api/read-text", AyneUiState.buildReadTextUrl(customBase))
         assertEquals("https://my-custom-vision.app/api/ask-question", AyneUiState.buildAskQuestionUrl(customBase))
+        assertEquals("https://my-custom-vision.app/api/see-and-describe/om", AyneUiState.buildVisionUrl(customBase, "om"))
+        assertEquals("https://my-custom-vision.app/api/see-and-describe/am", AyneUiState.buildVisionUrl(customBase, "am"))
+        assertEquals("https://my-custom-vision.app/api/read-text/om", AyneUiState.buildReadTextUrl(customBase, "om"))
+        assertEquals("https://my-custom-vision.app/api/read-text/am", AyneUiState.buildReadTextUrl(customBase, "am"))
+        assertEquals("https://my-custom-vision.app/api/ask-question/om", AyneUiState.buildAskQuestionUrl(customBase, "om"))
+        assertEquals("https://my-custom-vision.app/api/ask-question/am", AyneUiState.buildAskQuestionUrl(customBase, "am"))
     }
 
     @Test

@@ -165,8 +165,14 @@ class MirkuzVisionRepository(
             put("includeAudio", true)
         }
 
+        val targetUrl = when (preferredLanguage) {
+            "om" -> "${serverBaseUrl.trimEnd('/')}/api/see-and-describe/om"
+            "am" -> "${serverBaseUrl.trimEnd('/')}/api/see-and-describe/am"
+            else -> "${serverBaseUrl.trimEnd('/')}/api/see-and-describe"
+        }
+
         val request = Request.Builder()
-            .url("${serverBaseUrl.trimEnd('/')}/api/see-and-describe")
+            .url(targetUrl)
             .header("Content-Type", "application/json")
             .post(json.toString().toRequestBody("application/json".toMediaType()))
             .build()
