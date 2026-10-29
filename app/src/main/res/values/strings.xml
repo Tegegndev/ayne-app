@@ -82,7 +82,7 @@
 
     <!-- Multi-Turn Visual Follow-Up -->
     <string name="no_scene_in_memory">No active scene in memory. Press Volume+ or Describe Surroundings first to take a picture.</string>
-    <string name="recording_voice_prompt">Listening… Speak your question. It submits automatically when you pause.</string>
+    <string name="recording_voice_prompt">Listening… Speak your question. Tap or press Volume− to submit.</string>
     <string name="recording_voice_heard_speech">Heard you… Submitting when you pause</string>
     <string name="you_said_transcript">You said: %1$s</string>
     <string name="question_answer_title">Question &amp; Answer</string>

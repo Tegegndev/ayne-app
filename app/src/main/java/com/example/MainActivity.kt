@@ -365,11 +365,11 @@ class AyneViewModel(
     }
 
     // VAD tuning: mic amplitude threshold + hands-free timers
-    private val vadSpeechThreshold = 2000          // maxAmplitude is 0..32767
+    private val vadSpeechThreshold = 4500          // maxAmplitude is 0..32767
     private val vadPollIntervalMs = 100L
-    private val vadSilenceAutoSubmitMs = 600L      // silence after speech → submit
-    private val vadNoSpeechTimeoutMs = 3000L       // no speech at all → describe scene
-    private val vadMaxRecordingMs = 20_000L        // safety cap
+    private val vadSilenceAutoSubmitMs = 1800L     // 1.8s silence after speech → submit
+    private val vadNoSpeechTimeoutMs = 6000L       // 6s timeout if no speech at all
+    private val vadMaxRecordingMs = 25_000L        // safety cap
 
     // Silence fallback query sent when the user says nothing
     private val silenceFallbackQuery = "ትዕይንቱን ግለጽልኝ"
@@ -417,9 +417,9 @@ class AyneViewModel(
     fun openAskQuestion(context: Context, capturedFrame: String? = null) {
         bargeIn()
         val greeting = when (_uiState.value.selectedLanguage) {
-            SupportedLanguage.ENGLISH -> "Hello! How can I help you? Please ask your question, I am listening."
-            SupportedLanguage.AFAN_OROMOO -> "Akkam! Maal si gargaaru? Gaaffii kee gaafadhu, sin dhaggeeffadha."
-            SupportedLanguage.AMHARIC -> "ሰላም! ምን ልርዳዎት? ጥያቄዎን ይጠይቁ፤ እየሰማሁ ነው።"
+            SupportedLanguage.ENGLISH -> "Hello! How can I help you? Press Volume down or tap the microphone to ask your question."
+            SupportedLanguage.AFAN_OROMOO -> "Akkam! Maal si gargaaru? Gaaffii kee gaafachuuf Volume gadi dhiibi ykn maaykirofoonii tuqi."
+            SupportedLanguage.AMHARIC -> "ሰላም! ምን ልርዳዎት? ጥያቄዎን ለመጠየቅ የድምፅ መቀነሻ ቁልፍን ወይም ማይክሮፎኑን ይጫኑ።"
         }
         _uiState.update {
             it.copy(
@@ -430,13 +430,14 @@ class AyneViewModel(
                 companionGreeting = greeting,
                 lastAnswer = greeting,
                 lastEnglishAnswer = if (it.selectedLanguage == SupportedLanguage.ENGLISH) greeting else null,
-                lastReadResponse = null
+                lastReadResponse = null,
+                isRecordingVoice = false,
+                liveTranscription = null
             )
         }
         processingFeedbackHelper?.playSuccessTone()
         _userMessage.tryEmit(greeting)
         synthesizeAndPlayTtsFallback(context, greeting, _uiState.value)
-        startVoiceRecording(context)
     }
 
     fun enterCompanionMode(context: Context, capturedFrame: String? = null) {
@@ -1789,9 +1790,16 @@ fun AyneAppScreen(
 
     fun triggerVolumeFollowUp() {
         if (uiState.isRecordingVoice) {
-            // Manual override: submit what was heard so far (no barge-in, that would cancel the take)
+            // Already recording: submit what was heard so far!
             viewModel.stopAndSubmitVoiceRecording(context)
+        } else if (uiState.isAskQuestionOpen || uiState.isCompanionMode) {
+            // Already on Ask Question page: toggle mic on to talk!
+            viewModel.bargeIn()
+            requireMicPermission {
+                viewModel.startVoiceRecording(context)
+            }
         } else {
+            // On main screen: open Ask Question page, capture frame & play greeting!
             viewModel.bargeIn()
             viewModel.playTapEarcon()
             requireMicPermission {
@@ -3028,9 +3036,9 @@ fun AyneAskQuestionPanel(
                 Text(
                     text = if (isRecording) {
                         when (uiState.selectedLanguage) {
-                            SupportedLanguage.ENGLISH -> "Listening… Tap to Submit"
-                            SupportedLanguage.AFAN_OROMOO -> "Dhaga'aa jira… Xumuruuf tuqi"
-                            SupportedLanguage.AMHARIC -> "እያዳመጥኩ ነው… ለመጨረስ ይጫኑ"
+                            SupportedLanguage.ENGLISH -> "Listening… Tap to Submit (or Volume−)"
+                            SupportedLanguage.AFAN_OROMOO -> "Dhaggeeffachaa jira… Xumuruuf tuqi (Volume−)"
+                            SupportedLanguage.AMHARIC -> "እያዳመጥኩ ነው… ለመጨረስ ይጫኑ (ወይም Volume−)"
                         }
                     } else {
                         when (uiState.selectedLanguage) {

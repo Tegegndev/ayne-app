@@ -67,7 +67,7 @@
 
     <!-- Multi-Turn Visual Follow-Up -->
     <string name="no_scene_in_memory">ምንም የተቀመጠ ምስል የለም፤ መጀመሪያ ድምጽ + ቁልፍን ወይም ዙሪያውን አስረዳን ይጫኑ።</string>
-    <string name="recording_voice_prompt">እያዳመጥኩ ነው… ጥያቄዎን ይናገሩ፤ ስላለ ስታቆም በራሱ ይላካል።</string>
+    <string name="recording_voice_prompt">እያዳመጥኩ ነው… ጥያቄዎን ይናገሩ። ለመላክ የድምፅ መቀነሻ ቁልፍን ወይም ማይክሮፎኑን ይጫኑ።</string>
     <string name="recording_voice_heard_speech">ተሰምቷል… ስታቆም እልካለሁ</string>
     <string name="you_said_transcript">እርስዎ፦ %1$s</string>
     <string name="question_answer_title">ጥያቄ እና መልስ</string>
