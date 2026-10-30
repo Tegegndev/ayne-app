@@ -13,11 +13,51 @@ Read `AGENTS.md`, `README.md` and `ARCHITECTURE.md` first. They describe behavio
 2. **Preserve the streaming contract.** The read-text and ask flows emit `ocr`/`vision` first, then `audio_chunk`, then `done`. Playback must still start on the **first** chunk. Never buffer the whole audio file before playing.
 3. **Preserve zero-upload follow-ups.** When a `sessionId` exists and no new image is captured, the request body carries only `sessionId`/`chatId`. Client history must **not** be sent while a session id is present; that duplication is a deliberate anti-pattern to avoid.
 4. **Never touch secrets.** No keys in `app/src/**`. Do not modify `.env` handling or the backend base URL resolution. Do not commit `.env`.
-5. **Do not rename `applicationId` or the `com.example` / `com.mirkuz.vision` packages.** Package moves break signing, App Check registration and stored user state. Task 7 covers naming in *user-facing copy only*.
+5. **Package and branding must end up as Ayne, not Mirkuz** (Task 7), but do it as the *last* code task, after the structural work is green. Until then, do not rename anything. Never ship a half-renamed tree: either the whole package move compiles and installs, or it stays on its own branch.
 6. **No dependency changes.** No upgrades, no new libraries. OkHttp, Retrofit, Compose, CameraX and coroutines are already present; use them.
 7. **Tests stay green.** `./gradlew test` must pass after every commit. New helper = new test.
 8. **One concern per commit.** Conventional messages, e.g. `refactor(endpoints): add LanguageRouter and delete duplicated path rewriting`.
 9. **Stop and ask** if a "fix" would require inventing an endpoint, a response field or a permission. Never guess server behaviour.
+10. **This code is reviewed by professionals.** Write it like a senior would, not like a generator. See §0.1 — generated-looking code will be sent back.
+
+---
+
+## 0.1 Professional standards (no generated-looking code)
+
+A reviewer will read this diff. Every rule below exists because the opposite is what makes code read as machine-written.
+
+**Comments**
+- Never restate the code. `// increment counter` above `counter++` is noise; a comment must explain *why*, or the constraint the code cannot express.
+- No emoji, no decorative separators, no `=====` banners, no "AI: generated this".
+- No multi-paragraph explanatory comment blocks above trivial functions. KDoc only on public APIs whose contract is not obvious from the signature.
+- Delete narrated change history ("changed from X to Y"). That belongs in the commit message.
+
+**Names**
+- No abbreviations that a reader must decode (`mgr`, `svc`, `resp`, `tmp2`).
+- Booleans read as predicates (`isPlaying`, `hasSession`); functions read as verbs (`playAudio`, `resetSession`).
+- No `data`, `info`, `helper`, `util` as whole class names unless it is genuinely a utility holding pure functions.
+- No `Manager` class that owns both HTTP and state: split by responsibility.
+
+**Structure**
+- One responsibility per file; one reason to change per class.
+- Public functions declare explicit return types.
+- Prefer `sealed interface` results over exceptions for expected failures; reserve exceptions for programmer error.
+- No `!!`. No `GlobalScope`. No blocking calls on the main thread. No `Thread.sleep`.
+- No `lateinit` where a nullable or constructor dependency would do.
+- No commented-out code, no dead branches, no unused imports or resources (lint must be clean).
+- Magic numbers and strings become constants or resources; every user-facing string, including Amharic, lives in `strings.xml`.
+
+**Consistency**
+- Keep the existing style: 4-space indent, trailing commas, expression bodies for single-expression functions. Do not reformat files you did not otherwise change.
+- One HTTP stack (OkHttp), one JSON approach (keep what is there), one coroutine scope convention (`viewModelScope`).
+- Logging: `android.util.Log` with a stable tag per class. No `println`. No logging of image or audio payloads.
+
+**Diff hygiene**
+- A reviewer must be able to read each commit in under five minutes.
+- Move-only commits are pure moves: no formatting changes, no renames, no fixes bundled in.
+- If a rename touches more than twenty files, split it from behaviour changes.
+
+**What "done" looks like to a reviewer:** the diff makes the codebase smaller and clearer, every new abstraction eliminates a real duplication, and nothing was added because it seemed impressive.
 
 ---
 
@@ -100,13 +140,47 @@ MainActivity.kt                   edge-to-edge + setContent only
 
 ---
 
-## 7. Naming migration (user-facing only)
+## 7. Package name and branding: Mirkuz → Ayne
 
-- Replace user-visible "Mirkuz Vision" with "Ayne" in `strings.xml`, `values-am/strings.xml`, accessibility labels, and any spoken text.
-- Leave `com.mirkuz.vision` package and class names alone.
-- Record the decision in `AGENTS.md` (it already states Ayne is official).
+This is the one task that can destabilise the build, so it runs last and lands as a single commit (or two: package move, then copy).
 
----
+### 7a. Code identity
+
+Current state, verified: `namespace = "com.example"` in `app/build.gradle.kts`, sources under `app/src/main/java/com/example/` and `app/src/main/java/com/mirkuz/vision/`. No `google-services.json` is committed, so nothing here is pinned by Firebase yet.
+
+Target:
+| Setting | Target value |
+| --- | --- |
+| `namespace` | `com.ayne` |
+| `applicationId` | `com.ayne.app` |
+| Kotlin packages | `com.ayne.*` (`data`, `ui`, `viewmodel`, `domain`, `util`) |
+| Test packages | `com.ayne.*` under `app/src/test` and `app/src/androidTest` |
+
+Steps, in this order:
+
+1. Use Android Studio's **Refactor → Rename** on the package (or `git mv` the directories and rewrite `package`/`import` lines). Do not hand-edit a few files and leave the rest.
+2. Rename Mirkuz-prefixed classes as part of the same move:
+   - `MirkuzVisionRepository` → `VisionRepository`
+   - `MirkuzVisionManager` → `VisionNetworkManager`
+   - `MirkuzVisionManagerTest` → `VisionNetworkManagerTest`
+   - `MirkuzVisionRequest` / `MirkuzVisionResponse` → `AyneRequest` / `AyneResponse`
+   - temp-file prefixes `mirkuz_*` → `ayne_*`
+3. Update `namespace` and `applicationId` in `app/build.gradle.kts`. Leave `minSdk`, `targetSdk` and every dependency untouched.
+4. Search the whole tree for `com.example`, `com.mirkuz`, `Mirkuz`, `mirkuz` and resolve every hit, including ProGuard/R8 rules, test sources, `README`/`ARCHITECTURE` mentions, and `strings.xml`.
+5. If Firebase is configured later, register `com.ayne.app` in the Firebase console before adding `google-services.json`. Never invent a `google-services.json` and never commit one that does not match `applicationId`.
+6. Expect the new build to install as a **separate app**. Existing installs under the old id do not migrate; note that in the PR description.
+
+### 7b. Branding and copy
+
+- Replace every user-visible "Mirkuz Vision" with "Ayne" in `values/strings.xml`, `values-am/strings.xml`, accessibility labels, spoken text and dialogs.
+- Keep the legal/credit wording ("Ayne, built by Tegegn Wukianos Tafese").
+- Do not touch the brand mark assets delivered in the branding PR.
+
+### Acceptance
+
+- `grep -rniE "mirkuz|com\.example" app/ docs/ README.md` returns nothing outside this plan and git history.
+- `./gradlew lint test assembleDebug` green.
+- Fresh install on a clean device shows "Ayne" in the launcher, the recents card and app info.
 
 ## 8. Documentation upkeep
 
