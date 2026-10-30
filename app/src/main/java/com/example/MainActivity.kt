@@ -96,7 +96,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -147,6 +149,7 @@ import com.example.util.CameraCaptureHelper
 import com.example.util.Pcm16Decoder
 import com.example.util.ProcessingFeedbackHelper
 import com.example.util.VoiceRecorderHelper
+import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -156,9 +159,11 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 
 // ==========================================
@@ -173,6 +178,7 @@ enum class SupportedLanguage(val displayName: String, val code: String) {
 
 data class AyneUiState(
     val selectedLanguage: SupportedLanguage = SupportedLanguage.AMHARIC,
+    val isFirstLaunch: Boolean = false,
     val lastAnswer: String? = null,
     val lastEnglishAnswer: String? = null,
     val lastAudioBase64: String? = null,
@@ -439,6 +445,63 @@ class AyneViewModel(
         if (voiceRecorderHelper == null) {
             voiceRecorderHelper = VoiceRecorderHelper(context.applicationContext)
         }
+    }
+
+    /**
+     * Restores the saved language + voice before the first composition so the
+     * launch permission narration (and every screen) starts in the user's
+     * language. Called once, synchronously, from MainActivity.onCreate.
+     * When nothing is saved yet (fresh install) the default stays Amharic and
+     * [AyneUiState.isFirstLaunch] is set so the UI can offer the guided
+     * first-launch language picker.
+     */
+    fun initLanguagePreference(context: Context) {
+        val prefs = context.getSharedPreferences(LANGUAGE_PREFS_FILE, Context.MODE_PRIVATE)
+        val savedCode = prefs.getString(LANGUAGE_PREFS_KEY_LANGUAGE, null)
+        if (savedCode == null) {
+            _uiState.update {
+                it.copy(
+                    isFirstLaunch = true,
+                    selectedLanguage = SupportedLanguage.AMHARIC,
+                    customVoice = "am-hamen"
+                )
+            }
+            return
+        }
+        val language = SupportedLanguage.entries.firstOrNull { it.code == savedCode }
+            ?: SupportedLanguage.AMHARIC
+        _uiState.update { it.copy(selectedLanguage = language, customVoice = restoreVoice(language, prefs)) }
+    }
+
+    /** Keeps the customVoice consistent with its language rules (am-* / om-*, English free). */
+    private fun restoreVoice(language: SupportedLanguage, prefs: android.content.SharedPreferences): String {
+        val savedVoice = prefs.getString(LANGUAGE_PREFS_KEY_VOICE, null)
+        return when (language) {
+            SupportedLanguage.AFAN_OROMOO -> {
+                if (savedVoice == null || !savedVoice.startsWith("om-")) "om-ayyaantuu" else savedVoice
+            }
+            SupportedLanguage.AMHARIC -> {
+                if (savedVoice == null || !savedVoice.startsWith("am-")) "am-hamen" else savedVoice
+            }
+            SupportedLanguage.ENGLISH -> savedVoice ?: _uiState.value.customVoice
+        }
+    }
+
+    /** Persists the current language + voice whenever the user changes either. */
+    private fun saveLanguagePreference(context: Context) {
+        val state = _uiState.value
+        context.getSharedPreferences(LANGUAGE_PREFS_FILE, Context.MODE_PRIVATE).edit()
+            .putString(LANGUAGE_PREFS_KEY_LANGUAGE, state.selectedLanguage.code)
+            .putString(LANGUAGE_PREFS_KEY_VOICE, state.customVoice)
+            .putBoolean(LANGUAGE_PREFS_KEY_CHOSEN, true)
+            .apply()
+    }
+
+    private companion object {
+        const val LANGUAGE_PREFS_FILE = "ayne_settings"
+        const val LANGUAGE_PREFS_KEY_LANGUAGE = "language"
+        const val LANGUAGE_PREFS_KEY_VOICE = "voice"
+        const val LANGUAGE_PREFS_KEY_CHOSEN = "language_chosen"
     }
 
     fun showMessage(msg: String) {
@@ -947,6 +1010,7 @@ class AyneViewModel(
                     SupportedLanguage.ENGLISH -> _uiState.value.customVoice
                 }
                 _uiState.update { it.copy(selectedLanguage = action.language, customVoice = newVoice) }
+                saveLanguagePreference(context)
                 _userMessage.tryEmit("Language: ${action.language.displayName}")
             }
             is AyneAction.FlipCamera -> {
@@ -961,6 +1025,7 @@ class AyneViewModel(
             }
             is AyneAction.UpdateVoice -> {
                 _uiState.update { it.copy(customVoice = action.voiceId) }
+                saveLanguagePreference(context)
                 _userMessage.tryEmit("Voice set to ${action.voiceId}")
             }
             is AyneAction.UpdateImageCompression -> {
@@ -1847,6 +1912,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // Restore the saved language before composing so every spoken prompt
+        // (permission audio, TTS) starts in the user's chosen language.
+        viewModel.initLanguagePreference(this)
         setContent {
             AyneTheme {
                 AyneAppScreen(
@@ -2040,11 +2108,19 @@ fun AyneAppScreen(
     var showSettingsDialog by remember { mutableStateOf(false) }
     var pendingPermissionDialog by remember { mutableStateOf<String?>(null) }
     var pendingPermissionMessage by remember { mutableStateOf("") }
+    var showFirstLaunchPicker by rememberSaveable { mutableStateOf(false) }
+
+    // Launch-time permission flow: scheduled continuation of the request that is
+    // currently waiting for its system dialog result (null when no launch flow is active).
+    var launchCameraContinuation by remember { mutableStateOf<CancellableContinuation<Boolean>?>(null) }
+    var launchMicContinuation by remember { mutableStateOf<CancellableContinuation<Boolean>?>(null) }
 
     var onCameraGrantedAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     val cameraPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
+        launchCameraContinuation?.resumeWith(Result.success(isGranted))
+        launchCameraContinuation = null
         if (isGranted) {
             viewModel.showMessage(context.getString(R.string.camera_permission_granted))
             onCameraGrantedAction?.invoke()
@@ -2060,6 +2136,8 @@ fun AyneAppScreen(
     val micPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
+        launchMicContinuation?.resumeWith(Result.success(isGranted))
+        launchMicContinuation = null
         if (isGranted) {
             viewModel.showMessage(context.getString(R.string.mic_permission_granted))
             onMicGrantedAction?.invoke()
@@ -2112,6 +2190,78 @@ fun AyneAppScreen(
             ) {
                 micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
             }
+        }
+    }
+
+    /**
+     * Launch-time permission flow. A blind user should not discover a missing
+     * permission on their first volume-key press: ask for whatever is missing
+     * right on startup, narrated by the permission-guidance audio. Already
+     * granted permissions are never re-asked, so normal starts stay silent.
+     */
+    LaunchedEffect(Unit) {
+        val hasCamera = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.CAMERA
+        ) == PackageManager.PERMISSION_GRANTED
+        val hasMic = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+        if (hasCamera && hasMic) return@LaunchedEffect
+
+        // Let the first frame render and the audio helpers settle before speaking.
+        delay(600)
+
+        if (!hasCamera) {
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            val cameraGranted = suspendCancellableCoroutine { continuation ->
+                launchCameraContinuation = continuation
+                permissionPromptSpeaker.speakThen(
+                    permissionRationale(camera = true),
+                    uiState.selectedLanguage.code,
+                    "camera",
+                    uiState.baseUrl
+                ) {
+                    cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                }
+            }
+            if (!cameraGranted) {
+                // The launcher callback already raised the spoken "open settings"
+                // dialog. Let the user resolve it before asking for the next
+                // permission, so dialogs do not stack on top of each other.
+                snapshotFlow { pendingPermissionDialog }.first { it == null }
+            }
+        }
+
+        if (!hasMic) {
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            suspendCancellableCoroutine<Boolean> { continuation ->
+                launchMicContinuation = continuation
+                permissionPromptSpeaker.speakThen(
+                    permissionRationale(camera = false),
+                    uiState.selectedLanguage.code,
+                    "microphone",
+                    uiState.baseUrl
+                ) {
+                    micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                }
+            }
+        }
+
+        // First launch: guide the user through language selection once, after the
+        // permission requests are settled. TalkBack cannot read Ethiopic script,
+        // so the dialog is described via device TTS using English position hints.
+        if (uiState.isFirstLaunch) {
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            showFirstLaunchPicker = true
+            permissionPromptSpeaker.announce(
+                context.getString(R.string.language_picker_announcement),
+                "en"
+            )
+            // Wait until the user picks a language (closing happens on pick,
+            // back-press defers the choice and re-opens the picker next launch).
+            snapshotFlow { showFirstLaunchPicker }.first { it == false }
         }
     }
 
@@ -2411,6 +2561,21 @@ fun AyneAppScreen(
                             fontWeight = FontWeight.Medium
                         )
                     }
+                }
+            )
+        }
+
+        if (showFirstLaunchPicker) {
+            FirstLaunchLanguagePickerDialog(
+                onLanguageChosen = { language ->
+                    showFirstLaunchPicker = false
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    viewModel.onAction(context, AyneAction.SelectLanguage(language))
+                    // Confirm in the chosen language (device TTS, best effort).
+                    permissionPromptSpeaker.announce(language.displayName, language.code)
+                },
+                onDismiss = {
+                    showFirstLaunchPicker = false
                 }
             )
         }
@@ -3320,6 +3485,98 @@ fun LanguageSelector(
                 )
             }
         }
+    }
+}
+
+/**
+ * First-launch language picker shown once, voiced by the launcher's TTS
+ * announcement. Buttons carry English content descriptions with position
+ * hints because TalkBack cannot read Ethiopic script out loud.
+ */
+@Composable
+fun FirstLaunchLanguagePickerDialog(
+    onLanguageChosen: (SupportedLanguage) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        // Multi-language picker has no single "confirm": each language button
+        // confirms itself, so the required button slot stays empty.
+        confirmButton = {},
+        shape = RoundedCornerShape(20.dp),
+        containerColor = AynePureBlack,
+        titleContentColor = AyneVibrantYellow,
+        textContentColor = AynePureWhite,
+        modifier = Modifier
+            .border(2.dp, AyneVibrantYellow, RoundedCornerShape(20.dp))
+            .testTag("language_picker_dialog"),
+        title = {
+            Column {
+                Text(
+                    text = "ቋንቋ ይምረጡ",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = AyneVibrantYellow
+                )
+                Text(
+                    text = "Choose your language",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = AynePureWhite
+                )
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                FirstLaunchLanguageButton(
+                    label = "አማርኛ",
+                    hint = "Amharic, first button",
+                    tag = "language_button_am",
+                    onChosen = { onLanguageChosen(SupportedLanguage.AMHARIC) }
+                )
+                FirstLaunchLanguageButton(
+                    label = "Afaan Oromoo",
+                    hint = "Afaan Oromoo, middle button",
+                    tag = "language_button_om",
+                    onChosen = { onLanguageChosen(SupportedLanguage.AFAN_OROMOO) }
+                )
+                FirstLaunchLanguageButton(
+                    label = "English",
+                    hint = "English, last button",
+                    tag = "language_button_en",
+                    onChosen = { onLanguageChosen(SupportedLanguage.ENGLISH) }
+                )
+            }
+        }
+    )
+}
+
+@Composable
+private fun FirstLaunchLanguageButton(
+    label: String,
+    hint: String,
+    tag: String,
+    onChosen: () -> Unit
+) {
+    Button(
+        onClick = onChosen,
+        shape = RoundedCornerShape(12.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = AyneDarkCard,
+            contentColor = AynePureWhite
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 64.dp)
+            .border(1.dp, AyneVibrantYellow, RoundedCornerShape(12.dp))
+            .testTag(tag)
+            .semantics { contentDescription = hint }
+    ) {
+        Text(
+            text = label,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold
+        )
     }
 }
 

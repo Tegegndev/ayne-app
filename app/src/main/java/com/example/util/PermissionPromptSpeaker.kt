@@ -114,6 +114,11 @@ class PermissionPromptSpeaker(context: Context) {
         }.onFailure { Log.w(TAG, "Could not cache permission clip $id", it) }
     }
 
+    /** One-off spoken announcement with nothing to follow (first-launch picker). Device TTS only. */
+    fun announce(text: String, languageCode: String) {
+        speakFallback(text, languageCode) { }
+    }
+
     /** Plays a cached clip, then launches Android's permission prompt; falls back to device TTS. */
     fun speakThen(
         text: String,
