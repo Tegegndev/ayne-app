@@ -1285,15 +1285,21 @@ class AyneViewModel(
             var receivedAnswer = false
             var spokenThisTurn: String? = null
             var currentTranscribedQuery: String? = textQuery
+            var sessionExpired = false
             val audioChunks = StringBuilder()
 
-            // 1. Primary: Dedicated Real-Time SSE Stream (POST /api/ask-question/{lang}/stream)
-            val streamResult = visionApiService.askQuestionStream(
+            // 1. Primary: Dedicated Real-Time SSE Stream (POST /api/ask-question/{lang}/stream).
+            // A local function so an EXPIRED visual session can be retried once
+            // with the locally stored photo — the server forgets its session
+            // photo after a short TTL, which is what produced the endless
+            // "Visual session expired / photo expired" nag.
+            suspend fun runAskStream(sessionId: String?, imageBase64: String?): Result<Unit> =
+                visionApiService.askQuestionStream(
                 baseEndpointUrl = askEndpoint,
-                sessionId = sendSessionId,
+                sessionId = sessionId,
                 audioBase64 = voiceBase64,
                 query = textQuery,
-                imageBase64 = if (sendSessionId == null) lockedImage else null,
+                imageBase64 = imageBase64,
                 customVoice = voice,
                 ttsProvider = "addis",
                 preferredLanguage = prefLang,
@@ -1315,7 +1321,10 @@ class AyneViewModel(
                     receivedAnswer = true
                     processingFeedbackHelper?.stopWorkingFeedback()
                     processingFeedbackHelper?.playSuccessTone()
-                    val newSid = ansEv.sessionId?.takeIf { it.isNotBlank() } ?: sendSessionId
+                    // Persist only a FRESH session id — falling back to the
+                    // (possibly expired) sendSessionId here is what kept
+                    // re-seeding the dead session.
+                    val newSid = ansEv.sessionId?.takeIf { it.isNotBlank() }
                     val chosenAnswer = ansEv.cleanSpeech.ifBlank {
                         when (state.selectedLanguage) {
                             SupportedLanguage.ENGLISH -> ansEv.english.ifBlank { ansEv.amharic }
@@ -1333,7 +1342,7 @@ class AyneViewModel(
 
                     _uiState.update {
                         it.copy(
-                            askQuestionSessionId = newSid,
+                            askQuestionSessionId = newSid ?: it.askQuestionSessionId,
                             askQuestionHistory = updatedAskHistory,
                             askQuestionLastAnswer = chosenAnswer,
                             lastAnswer = chosenAnswer,
@@ -1363,19 +1372,20 @@ class AyneViewModel(
                     processingFeedbackHelper?.stopWorkingFeedback()
                     processingFeedbackHelper?.playInstantTapEarcon()
                     if (code == "SESSION_EXPIRED") {
+                        // Stale visual session: purge EVERY stale id (the old
+                        // code kept activeSessionId alive and re-sent it, so
+                        // the error repeated forever) and let the post-stream
+                        // self-heal below retry from the local photo.
+                        sessionExpired = true
+                        activeSessionId = null
                         _uiState.update {
                             it.copy(
                                 askQuestionSessionId = null,
+                                activeSessionId = null,
                                 isBusy = false,
                                 busyMessage = null
                             )
                         }
-                        val prompt = if (state.selectedLanguage == SupportedLanguage.AFAN_OROMOO) {
-                            context.getString(R.string.session_expired_prompt_om)
-                        } else {
-                            context.getString(R.string.session_expired_prompt)
-                        }
-                        _userMessage.tryEmit(prompt)
                     } else if (code == "INADMISSIBLE_AUDIO") {
                         _uiState.update {
                             it.copy(
@@ -1402,24 +1412,33 @@ class AyneViewModel(
                     }
                 },
                 onDone = {
-                    _uiState.update {
-                        it.copy(
-                            isBusy = false,
-                            busyMessage = null
-                        )
-                    }
-                    val fullAudio = audioChunks.toString()
-                    if (fullAudio.isNotBlank()) {
-                        _uiState.update { it.copy(lastAudioBase64 = fullAudio) }
-                        audioPlaybackHelper.setLastConsolidatedAudio(context, fullAudio)
-                    } else if (receivedAnswer && !spokenThisTurn.isNullOrBlank()) {
-                        synthesizeAndPlayTtsFallback(context, spokenThisTurn!!, _uiState.value)
-                    } else if (!receivedAnswer) {
-                        // No answer for THIS question — never speak the previous
-                        // turn's answer again (the "AI repeats itself" bug).
-                        _userMessage.tryEmit(context.getString(R.string.snackbar_no_answer))
+                    // An expired-session pass ends silently here; the self-heal
+                    // retry below owns the outcome instead.
+                    if (!(sessionExpired && !receivedAnswer)) {
+                        _uiState.update {
+                            it.copy(
+                                isBusy = false,
+                                busyMessage = null
+                            )
+                        }
+                        val fullAudio = audioChunks.toString()
+                        if (fullAudio.isNotBlank()) {
+                            _uiState.update { it.copy(lastAudioBase64 = fullAudio) }
+                            audioPlaybackHelper.setLastConsolidatedAudio(context, fullAudio)
+                        } else if (receivedAnswer && !spokenThisTurn.isNullOrBlank()) {
+                            synthesizeAndPlayTtsFallback(context, spokenThisTurn!!, _uiState.value)
+                        } else if (!receivedAnswer) {
+                            // No answer for THIS question — never speak the previous
+                            // turn's answer again (the "AI repeats itself" bug).
+                            _userMessage.tryEmit(context.getString(R.string.snackbar_no_answer))
+                        }
                     }
                 }
+            )
+
+            val streamResult = runAskStream(
+                sessionId = sendSessionId,
+                imageBase64 = if (sendSessionId == null) lockedImage else null
             )
 
             // 2. Fallback to buffered JSON (POST /api/ask-question or /api/ask-question/om or /api/ask-question/am)
@@ -1506,6 +1525,27 @@ class AyneViewModel(
                         isBusy = false,
                         busyMessage = null
                     )
+                }
+            }
+
+            // 3. Self-heal an expired visual session: the question never got
+            // answered, we still hold the photo locally, and every stale
+            // session id is purged — so answer from OUR photo with a fresh
+            // session instead of telling the user "photo expired".
+            if (sessionExpired && !receivedAnswer) {
+                if (!lockedImage.isNullOrBlank()) {
+                    audioChunks.clear()
+                    _uiState.update { it.copy(isBusy = true, busyMessage = progressMsg) }
+                    processingFeedbackHelper?.startWorkingFeedback(viewModelScope)
+                    runAskStream(sessionId = null, imageBase64 = lockedImage)
+                } else {
+                    // Nothing to recover with — a new photo is genuinely needed.
+                    val prompt = if (state.selectedLanguage == SupportedLanguage.AFAN_OROMOO) {
+                        context.getString(R.string.session_expired_prompt_om)
+                    } else {
+                        context.getString(R.string.session_expired_prompt)
+                    }
+                    _userMessage.tryEmit(prompt)
                 }
             }
         }
