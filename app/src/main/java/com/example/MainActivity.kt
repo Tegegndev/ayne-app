@@ -359,6 +359,23 @@ class AyneViewModel(
     private var voiceRecorderHelper: VoiceRecorderHelper? = null
     private var realtimeClient: AddisRealtimeClient? = null
     private var recordingJob: Job? = null
+
+    /**
+     * The streaming network job responsible for the current spoken answer
+     * (describe / follow-up / read-text). Cancelled on barge-in so an
+     * interrupted answer STOPS streaming instead of re-enqueueing later audio
+     * chunks and talking over (or into) whatever the user does next.
+     */
+    private var activeApiJob: Job? = null
+
+    /**
+     * Cancels the in-flight answer stream (if any) so no further audio chunks
+     * or state updates from that request can arrive. Safe to call anytime.
+     */
+    private fun cancelActiveApiJob() {
+        activeApiJob?.cancel()
+        activeApiJob = null
+    }
     private var activeSessionId: String? = null
 
     /**
@@ -421,6 +438,7 @@ class AyneViewModel(
     fun bargeIn() {
         audioPlaybackHelper.stop()
         processingFeedbackHelper?.stopWorkingFeedback()
+        cancelActiveApiJob()  // a higher-priority request replaces the streaming answer
         realtimeClient?.cancel()  // abort any in-flight Mode B voice turn
         if (_uiState.value.isRecordingVoice) {
             cancelVoiceRecording()
@@ -436,6 +454,7 @@ class AyneViewModel(
     fun stopPlaybackOnly() {
         audioPlaybackHelper.stop()
         processingFeedbackHelper?.stopWorkingFeedback()
+        cancelActiveApiJob()  // interrupted answer must not keep streaming
         realtimeClient?.cancel()
     }
 
@@ -940,13 +959,28 @@ class AyneViewModel(
                 _userMessage.tryEmit("Volume ▲: Capturing fresh surroundings...")
             }
             is AyneAction.VolumeFollowUpTriggered -> {
-                val sid = activeSessionId ?: _uiState.value.activeSessionId
                 if (_uiState.value.isRecordingVoice) {
+                    // While already recording (ask tab), Volume− submits the take.
                     stopAndSubmitVoiceRecording(context)
-                } else if (_uiState.value.lockedImageBase64 == null && sid == null) {
-                    _userMessage.tryEmit(context.getString(R.string.no_scene_in_memory))
-                } else {
+                } else if (_uiState.value.isAskQuestionOpen) {
+                    // Inside the ask tab, not yet recording → start recording.
                     startVoiceRecording(context)
+                } else {
+                    // Anywhere else (home / vision): Volume− is a FOLLOW-UP
+                    // question, never a bare recording — and its silence
+                    // fallback must therefore never fire a describe. Use the
+                    // same follow-up entry as the home-screen volume path:
+                    // already-listening orb with history retained, or a fresh
+                    // greet-and-ask session only when nothing is in memory.
+                    val hasContext = _uiState.value.lockedImageBase64 != null ||
+                        _uiState.value.activeSessionId != null ||
+                        activeSessionId != null ||
+                        _uiState.value.askQuestionHistory.isNotEmpty()
+                    if (hasContext) {
+                        openAskFollowUp(context)
+                    } else {
+                        openAskQuestion(context)
+                    }
                 }
             }
         }
@@ -986,7 +1020,7 @@ class AyneViewModel(
         }
         processingFeedbackHelper?.startWorkingFeedback(viewModelScope)
 
-        viewModelScope.launch {
+        activeApiJob = viewModelScope.launch {
             val prefLang = when (state.selectedLanguage) {
                 SupportedLanguage.ENGLISH -> "en"
                 SupportedLanguage.AFAN_OROMOO -> "om"
@@ -1052,15 +1086,20 @@ class AyneViewModel(
                     }
                 },
                 onAudioChunk = { chunkEvent ->
-                    audioChunks.append(chunkEvent.chunkBase64)
-                    audioPlaybackHelper.enqueueAudioChunk(
-                        context = context,
-                        rawBase64Chunk = chunkEvent.chunkBase64,
-                        format = chunkEvent.format,
-                        onError = { err ->
-                            _userMessage.tryEmit("Audio error: $err")
-                        }
-                    )
+                    if (!_uiState.value.isRecordingVoice) {
+                        audioChunks.append(chunkEvent.chunkBase64)
+                        audioPlaybackHelper.enqueueAudioChunk(
+                            context = context,
+                            rawBase64Chunk = chunkEvent.chunkBase64,
+                            format = chunkEvent.format,
+                            onError = { err ->
+                                _userMessage.tryEmit("Audio error: $err")
+                            }
+                        )
+                    }
+                    // else: defense in depth — an interrupted stream (or one racing
+                    // a just-started recording) must never feed the speaker,
+                    // otherwise the mic hears the old answer instead of the user.
                 },
                 onDone = {
                     _uiState.update {
@@ -1206,7 +1245,7 @@ class AyneViewModel(
         }
         processingFeedbackHelper?.startWorkingFeedback(viewModelScope)
 
-        viewModelScope.launch {
+        activeApiJob = viewModelScope.launch {
             val prefLang = when (state.selectedLanguage) {
                 SupportedLanguage.ENGLISH -> "en"
                 SupportedLanguage.AFAN_OROMOO -> "om"
@@ -1286,16 +1325,20 @@ class AyneViewModel(
                     }
                 },
                 onAudioChunk = { chunkEv ->
-                    audioChunks.append(chunkEv.chunkBase64)
-                    // Progressive streaming MP3 playback through speaker (<1.2s first word)
-                    audioPlaybackHelper.enqueueAudioChunk(
-                        context = context,
-                        rawBase64Chunk = chunkEv.chunkBase64,
-                        format = chunkEv.format,
-                        onError = { err ->
-                            _userMessage.tryEmit("Audio error: $err")
-                        }
-                    )
+                    if (!_uiState.value.isRecordingVoice) {
+                        audioChunks.append(chunkEv.chunkBase64)
+                        // Progressive streaming MP3 playback through speaker (<1.2s first word)
+                        audioPlaybackHelper.enqueueAudioChunk(
+                            context = context,
+                            rawBase64Chunk = chunkEv.chunkBase64,
+                            format = chunkEv.format,
+                            onError = { err ->
+                                _userMessage.tryEmit("Audio error: $err")
+                            }
+                        )
+                    }
+                    // else: never feed the speaker while the user is recording —
+                    // the mic would hear the old answer instead of their question.
                 },
                 onErrorEvent = { code, message ->
                     processingFeedbackHelper?.stopWorkingFeedback()
@@ -1467,7 +1510,7 @@ class AyneViewModel(
         }
         processingFeedbackHelper?.startWorkingFeedback(viewModelScope)
 
-        viewModelScope.launch {
+        activeApiJob = viewModelScope.launch {
             val prefLang = when (state.selectedLanguage) {
                 SupportedLanguage.ENGLISH -> "en"
                 SupportedLanguage.AFAN_OROMOO -> "om"
@@ -1530,16 +1573,19 @@ class AyneViewModel(
                     }
                 },
                 onAudioChunk = { chunkEvent ->
-                    audioChunks.append(chunkEvent.chunkBase64)
-                    // Play audio chunk through speaker right away (~700ms after OCR)
-                    audioPlaybackHelper.enqueueAudioChunk(
-                        context = context,
-                        rawBase64Chunk = chunkEvent.chunkBase64,
-                        format = chunkEvent.format,
-                        onError = { err ->
-                            _userMessage.tryEmit("Audio error: $err")
-                        }
-                    )
+                    if (!_uiState.value.isRecordingVoice) {
+                        audioChunks.append(chunkEvent.chunkBase64)
+                        // Play audio chunk through speaker right away (~700ms after OCR)
+                        audioPlaybackHelper.enqueueAudioChunk(
+                            context = context,
+                            rawBase64Chunk = chunkEvent.chunkBase64,
+                            format = chunkEvent.format,
+                            onError = { err ->
+                                _userMessage.tryEmit("Audio error: $err")
+                            }
+                        )
+                    }
+                    // else: never feed the speaker while the user is recording.
                 },
                 onDone = {
                     _uiState.update {
