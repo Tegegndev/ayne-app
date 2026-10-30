@@ -15,12 +15,27 @@ class AudioPlaybackHelper {
     @Volatile
     private var isPlayingQueue = false
 
+    /**
+     * Notified whenever audio playback starts or fully stops, so the UI can
+     * reflect the "assistant is speaking" state (e.g. the voice orb).
+     */
+    var onPlaybackStateChanged: ((Boolean) -> Unit)? = null
+    @Volatile
+    private var lastNotifiedPlaying = false
+
     val isPlaying: Boolean
         get() = try {
             mediaPlayer?.isPlaying == true || isPlayingQueue
         } catch (e: Exception) {
             false
         }
+
+    private fun notifyPlaybackState(playing: Boolean) {
+        if (playing != lastNotifiedPlaying) {
+            lastNotifiedPlaying = playing
+            onPlaybackStateChanged?.invoke(playing)
+        }
+    }
 
     /**
      * Enqueue a real-time audio chunk for immediate sequential playback.
@@ -68,6 +83,7 @@ class AudioPlaybackHelper {
         val nextFile = chunkQueue.poll()
         if (nextFile == null) {
             isPlayingQueue = false
+            notifyPlaybackState(false)
             return
         }
 
@@ -104,6 +120,7 @@ class AudioPlaybackHelper {
                 }
                 prepare()
                 start()
+                notifyPlaybackState(true)
             }
         } catch (e: Exception) {
             try {
@@ -204,18 +221,22 @@ class AudioPlaybackHelper {
                 setOnCompletionListener {
                     onComplete?.invoke()
                     releasePlayer()
+                    notifyPlaybackState(false)
                 }
                 setOnErrorListener { _, what, extra ->
                     onError?.invoke("MediaPlayer error: $what, extra: $extra")
                     releasePlayer()
+                    notifyPlaybackState(false)
                     true
                 }
                 prepare()
                 start()
+                notifyPlaybackState(true)
             }
         } catch (e: Exception) {
             onError?.invoke(e.localizedMessage ?: "Failed to initialize media player")
             releasePlayer()
+            notifyPlaybackState(false)
         }
     }
 
@@ -238,6 +259,7 @@ class AudioPlaybackHelper {
             // Ignore stop errors
         } finally {
             mediaPlayer = null
+            notifyPlaybackState(false)
         }
     }
 

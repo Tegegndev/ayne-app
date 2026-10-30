@@ -128,6 +128,7 @@ import com.example.data.VisionApiService
 import com.example.data.VisionDescribeResponse
 import com.example.ui.AfaanOromooMockScreen
 import com.example.ui.EnglishMockScreen
+import com.example.ui.VoiceAskScreen
 import com.example.ui.theme.AyneDarkCard
 import com.example.ui.theme.AyneOnYellow
 import com.example.ui.theme.AynePureBlack
@@ -182,6 +183,8 @@ data class AyneUiState(
     val isRecordingVoice: Boolean = false,
     val heardSpeech: Boolean = false,
     val liveTranscription: String? = null,
+    val micLevel: Float = 0f,
+    val isAssistantSpeaking: Boolean = false,
     val isCompanionMode: Boolean = false,
     val companionGreeting: String? = null,
     val isAskQuestionOpen: Boolean = false,
@@ -389,6 +392,14 @@ class AyneViewModel(
     private val _userMessage = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val userMessage: SharedFlow<String> = _userMessage.asSharedFlow()
 
+    init {
+        // Mirror the audio player's start/stop into UI state so the voice orb
+        // can animate the "assistant is speaking" phase.
+        audioPlaybackHelper.onPlaybackStateChanged = { speaking ->
+            _uiState.update { it.copy(isAssistantSpeaking = speaking) }
+        }
+    }
+
     fun initFeedbackHelper(context: Context) {
         if (processingFeedbackHelper == null) {
             processingFeedbackHelper = ProcessingFeedbackHelper(context.applicationContext)
@@ -417,9 +428,9 @@ class AyneViewModel(
     fun openAskQuestion(context: Context, capturedFrame: String? = null) {
         bargeIn()
         val greeting = when (_uiState.value.selectedLanguage) {
-            SupportedLanguage.ENGLISH -> "Hello! How can I help you? Press Volume down or tap the microphone to ask your question."
-            SupportedLanguage.AFAN_OROMOO -> "Akkam! Maal si gargaaru? Gaaffii kee gaafachuuf Volume gadi dhiibi ykn maaykirofoonii tuqi."
-            SupportedLanguage.AMHARIC -> "ሰላም! ምን ልርዳዎት? ጥያቄዎን ለመጠየቅ የድምፅ መቀነሻ ቁልፍን ወይም ማይክሮፎኑን ይጫኑ።"
+            SupportedLanguage.ENGLISH -> "Hello! How can I help you? Press Volume up to take a photo, or Volume down to ask your question."
+            SupportedLanguage.AFAN_OROMOO -> "Akkam! Maal si gargaaru? Suuraa kaasuuf Volume ol dhiibi, gaaffii gaafachuuf Volume gadi dhiibi."
+            SupportedLanguage.AMHARIC -> "ሰላም! ምን ልርዳዎት? ፎቶ ለማንሳት የድምፅ መጨመሪያውን፣ ጥያቄ ለመጠየቅ የድምፅ መቀነሻውን ይጫኑ።"
         }
         _uiState.update {
             it.copy(
@@ -432,12 +443,32 @@ class AyneViewModel(
                 lastEnglishAnswer = if (it.selectedLanguage == SupportedLanguage.ENGLISH) greeting else null,
                 lastReadResponse = null,
                 isRecordingVoice = false,
+                micLevel = 0f,
                 liveTranscription = null
             )
         }
         processingFeedbackHelper?.playSuccessTone()
         _userMessage.tryEmit(greeting)
         synthesizeAndPlayTtsFallback(context, greeting, _uiState.value)
+    }
+
+    /**
+     * Stores a freshly captured frame without restarting the Ask Question
+     * conversation (greeting and history stay intact). Any previous
+     * image/session binding is cleared so the new photo is uploaded with the
+     * next question.
+     */
+    fun setLockedFrame(frameBase64: String?) {
+        if (frameBase64.isNullOrBlank()) return
+        activeSessionId = null
+        _uiState.update {
+            it.copy(
+                lockedImageBase64 = frameBase64,
+                lastCapturedBase64 = frameBase64,
+                activeSessionId = null,
+                askQuestionSessionId = null
+            )
+        }
     }
 
     fun enterCompanionMode(context: Context, capturedFrame: String? = null) {
@@ -479,7 +510,7 @@ class AyneViewModel(
 
         val started = voiceRecorderHelper?.startRecording() == true
         if (started) {
-            _uiState.update { it.copy(isRecordingVoice = true, heardSpeech = false, liveTranscription = null) }
+            _uiState.update { it.copy(isRecordingVoice = true, heardSpeech = false, liveTranscription = null, micLevel = 0f) }
             _userMessage.tryEmit(context.getString(R.string.recording_voice_prompt))
 
             // Hands-free VAD loop:
@@ -497,6 +528,18 @@ class AyneViewModel(
                     listenedMs += vadPollIntervalMs
 
                     val amplitude = voiceRecorderHelper?.currentAmplitude ?: 0
+
+                    // Publish a smoothed 0..1 mic level for the voice orb ripple animation.
+                    // Fast attack, gentle release (~15% decay per 100ms tick).
+                    val normalizedLevel = (amplitude / 10000f).coerceIn(0.06f, 1f)
+                    _uiState.update { prev ->
+                        prev.copy(micLevel = if (normalizedLevel > prev.micLevel) {
+                            normalizedLevel
+                        } else {
+                            prev.micLevel * 0.85f
+                        })
+                    }
+
                     if (amplitude >= vadSpeechThreshold) {
                         if (!hasSpoken) {
                             // Barge-In: user started speaking — immediately mute speaker
@@ -583,7 +626,7 @@ class AyneViewModel(
         if (!_uiState.value.isRecordingVoice) return
 
         playTapEarcon()
-        _uiState.update { it.copy(isRecordingVoice = false) }
+        _uiState.update { it.copy(isRecordingVoice = false, micLevel = 0f) }
 
         val voiceBase64 = voiceRecorderHelper?.stopRecording()
         if (voiceBase64.isNullOrBlank()) {
@@ -602,7 +645,7 @@ class AyneViewModel(
         recordingJob?.cancel()
         recordingJob = null
         voiceRecorderHelper?.cancelRecording()
-        _uiState.update { it.copy(isRecordingVoice = false, heardSpeech = false) }
+        _uiState.update { it.copy(isRecordingVoice = false, heardSpeech = false, micLevel = 0f) }
     }
 
     fun onAction(context: Context, action: AyneAction) {
@@ -657,6 +700,7 @@ class AyneViewModel(
                         conversationHistory = emptyList(),
                         isRecordingVoice = false,
                         heardSpeech = false,
+                        micLevel = 0f,
                         liveTranscription = null
                     )
                 }
@@ -779,7 +823,8 @@ class AyneViewModel(
                 lastReadResponse = null,
                 lastResponse = null,
                 conversationHistory = emptyList(),
-                isRecordingVoice = false
+                isRecordingVoice = false,
+                micLevel = 0f
             )
         }
         processingFeedbackHelper?.startWorkingFeedback(viewModelScope)
@@ -1777,6 +1822,42 @@ fun AyneAppScreen(
         }
     }
 
+    fun captureAskQuestionScene() {
+        viewModel.bargeIn()
+        viewModel.playTapEarcon()
+        requireCameraPermission {
+            coroutineScope.launch {
+                val frame = try {
+                    CameraCaptureHelper.captureFrame(context, imageCapture)
+                } catch (_: Throwable) {
+                    null
+                }
+                if (frame != null) {
+                    viewModel.setLockedFrame(frame)
+                    val capturedMsg = when (uiState.selectedLanguage) {
+                        SupportedLanguage.ENGLISH -> "Photo captured. Press Volume− to ask."
+                        SupportedLanguage.AFAN_OROMOO -> "Suuraan kaafame. Gaafachuuf Volume gadi dhiibi."
+                        SupportedLanguage.AMHARIC -> "ፎቶ ተነስቷል። ለመጠየቅ የድምፅ መቀነሻውን ይጫኑ።"
+                    }
+                    viewModel.showMessage(capturedMsg)
+                }
+            }
+        }
+    }
+
+    /**
+     * Volume+ handler. On the Ask Question page it only takes a photo for the
+     * upcoming question; everywhere else it keeps the "describe surroundings"
+     * behavior.
+     */
+    fun triggerVolumeCapture() {
+        if (uiState.isAskQuestionOpen || uiState.isCompanionMode) {
+            captureAskQuestionScene()
+        } else {
+            triggerDescribeSurroundings()
+        }
+    }
+
     fun triggerReadText() {
         viewModel.bargeIn()
         viewModel.playTapEarcon()
@@ -1793,31 +1874,24 @@ fun AyneAppScreen(
             // Already recording: submit what was heard so far!
             viewModel.stopAndSubmitVoiceRecording(context)
         } else if (uiState.isAskQuestionOpen || uiState.isCompanionMode) {
-            // Already on Ask Question page: toggle mic on to talk!
+            // Already on Ask Question page: Volume− only records the question.
+            // The photo is taken separately with Volume+.
             viewModel.bargeIn()
             requireMicPermission {
                 viewModel.startVoiceRecording(context)
             }
         } else {
-            // On main screen: open Ask Question page, capture frame & play greeting!
+            // On main screen: just open Ask Question page and play the greeting.
+            // No image is taken until the user presses Volume+.
             viewModel.bargeIn()
             viewModel.playTapEarcon()
-            requireMicPermission {
-                coroutineScope.launch {
-                    val frame = try {
-                        CameraCaptureHelper.captureFrame(context, imageCapture)
-                    } catch (_: Throwable) {
-                        null
-                    }
-                    viewModel.openAskQuestion(context, frame)
-                }
-            }
+            viewModel.openAskQuestion(context)
         }
     }
 
     LaunchedEffect(onRegisterVolumeHandlers, uiState.isRecordingVoice, uiState.lockedImageBase64, uiState.activeSessionId, uiState.isCompanionMode, uiState.isAskQuestionOpen) {
         onRegisterVolumeHandlers?.invoke(
-            { triggerDescribeSurroundings() },
+            { triggerVolumeCapture() },
             { triggerVolumeFollowUp() }
         )
     }
@@ -1854,55 +1928,72 @@ fun AyneAppScreen(
             }
         }
     ) { innerPadding ->
-        when (uiState.selectedLanguage) {
-            SupportedLanguage.ENGLISH -> {
-                EnglishMockScreen(
-                    uiState = uiState,
-                    onAction = { action -> viewModel.onAction(context, action) },
-                    onDescribeClick = { triggerDescribeSurroundings() },
-                    onReadTextClick = { triggerReadText() },
-                    onAskQuestionClick = { triggerVolumeFollowUp() },
-                    onRepeatClick = { viewModel.onAction(context, AyneAction.RepeatLastAnswer) },
-                    onLanguageSelected = { lang -> viewModel.onAction(context, AyneAction.SelectLanguage(lang)) },
-                    onFlipCamera = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        viewModel.onAction(context, AyneAction.FlipCamera)
-                    },
-                    onSettingsClick = { showSettingsDialog = true },
-                    modifier = Modifier.padding(innerPadding)
-                )
-            }
-            SupportedLanguage.AFAN_OROMOO -> {
-                AfaanOromooMockScreen(
-                    uiState = uiState,
-                    onAction = { action -> viewModel.onAction(context, action) },
-                    onDescribeClick = { triggerDescribeSurroundings() },
-                    onReadTextClick = { triggerReadText() },
-                    onAskQuestionClick = { triggerVolumeFollowUp() },
-                    onRepeatClick = { viewModel.onAction(context, AyneAction.RepeatLastAnswer) },
-                    onLanguageSelected = { lang -> viewModel.onAction(context, AyneAction.SelectLanguage(lang)) },
-                    onFlipCamera = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        viewModel.onAction(context, AyneAction.FlipCamera)
-                    },
-                    onSettingsClick = { showSettingsDialog = true },
-                    modifier = Modifier.padding(innerPadding)
-                )
-            }
-            SupportedLanguage.AMHARIC -> {
-                AyneScreenContent(
-                    uiState = uiState,
-                    onAction = { action -> viewModel.onAction(context, action) },
-                    onDescribeClick = { triggerDescribeSurroundings() },
-                    onReadTextClick = { triggerReadText() },
-                    onAskQuestionClick = { triggerVolumeFollowUp() },
-                    onFlipCamera = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        viewModel.onAction(context, AyneAction.FlipCamera)
-                    },
-                    onSettingsClick = { showSettingsDialog = true },
-                    modifier = Modifier.padding(innerPadding)
-                )
+        if (uiState.isCompanionMode) {
+            // Full-screen voice-only Ask AI: ripple orb takes over the whole screen.
+            VoiceAskScreen(
+                uiState = uiState,
+                onClose = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    viewModel.onAction(context, AyneAction.ExitCompanionMode)
+                },
+                onNewChat = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    viewModel.onAction(context, AyneAction.ClearAskQuestionHistory)
+                },
+                onMicTap = { triggerVolumeFollowUp() },
+                modifier = Modifier.padding(innerPadding)
+            )
+        } else {
+            when (uiState.selectedLanguage) {
+                SupportedLanguage.ENGLISH -> {
+                    EnglishMockScreen(
+                        uiState = uiState,
+                        onAction = { action -> viewModel.onAction(context, action) },
+                        onDescribeClick = { triggerDescribeSurroundings() },
+                        onReadTextClick = { triggerReadText() },
+                        onAskQuestionClick = { triggerVolumeFollowUp() },
+                        onRepeatClick = { viewModel.onAction(context, AyneAction.RepeatLastAnswer) },
+                        onLanguageSelected = { lang -> viewModel.onAction(context, AyneAction.SelectLanguage(lang)) },
+                        onFlipCamera = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            viewModel.onAction(context, AyneAction.FlipCamera)
+                        },
+                        onSettingsClick = { showSettingsDialog = true },
+                        modifier = Modifier.padding(innerPadding)
+                    )
+                }
+                SupportedLanguage.AFAN_OROMOO -> {
+                    AfaanOromooMockScreen(
+                        uiState = uiState,
+                        onAction = { action -> viewModel.onAction(context, action) },
+                        onDescribeClick = { triggerDescribeSurroundings() },
+                        onReadTextClick = { triggerReadText() },
+                        onAskQuestionClick = { triggerVolumeFollowUp() },
+                        onRepeatClick = { viewModel.onAction(context, AyneAction.RepeatLastAnswer) },
+                        onLanguageSelected = { lang -> viewModel.onAction(context, AyneAction.SelectLanguage(lang)) },
+                        onFlipCamera = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            viewModel.onAction(context, AyneAction.FlipCamera)
+                        },
+                        onSettingsClick = { showSettingsDialog = true },
+                        modifier = Modifier.padding(innerPadding)
+                    )
+                }
+                SupportedLanguage.AMHARIC -> {
+                    AyneScreenContent(
+                        uiState = uiState,
+                        onAction = { action -> viewModel.onAction(context, action) },
+                        onDescribeClick = { triggerDescribeSurroundings() },
+                        onReadTextClick = { triggerReadText() },
+                        onAskQuestionClick = { triggerVolumeFollowUp() },
+                        onFlipCamera = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            viewModel.onAction(context, AyneAction.FlipCamera)
+                        },
+                        onSettingsClick = { showSettingsDialog = true },
+                        modifier = Modifier.padding(innerPadding)
+                    )
+                }
             }
         }
 
@@ -2705,431 +2796,22 @@ fun AyneAskQuestionPanel(
     onSpeakClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // Voice-only full-screen redesign: the old chat-panel UI was replaced by
+    // the immersive ripple-orb experience (see ui/VoiceAskScreen.kt).
     val haptic = LocalHapticFeedback.current
-    var typedQuestion by remember { mutableStateOf("") }
-    val listState = rememberLazyListState()
-
-    // Auto-scroll to latest message
-    LaunchedEffect(uiState.askQuestionHistory.size, uiState.liveTranscription) {
-        if (uiState.askQuestionHistory.isNotEmpty()) {
-            listState.animateScrollToItem(uiState.askQuestionHistory.size - 1)
-        }
-    }
-
-    Column(
+    VoiceAskScreen(
+        uiState = uiState,
+        onClose = {
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            onAction(AyneAction.ExitCompanionMode)
+        },
+        onNewChat = {
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            onAction(AyneAction.ClearAskQuestionHistory)
+        },
+        onMicTap = onSpeakClick,
         modifier = modifier
-            .fillMaxWidth()
-            .testTag("companion_mode_container"),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        // 1. Header Card (Title, New Chat button, Back button)
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = AyneDarkCard,
-            border = BorderStroke(2.dp, AyneVibrantYellow),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clip(CircleShape)
-                            .background(AyneVibrantYellow),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.QuestionAnswer,
-                            contentDescription = null,
-                            tint = AyneOnYellow,
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column {
-                        Text(
-                            text = when (uiState.selectedLanguage) {
-                                SupportedLanguage.ENGLISH -> "Ask Question"
-                                SupportedLanguage.AFAN_OROMOO -> "Gaaffii Gaafadhu"
-                                SupportedLanguage.AMHARIC -> "ጥያቄ ይጠይቁ"
-                            },
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = AyneVibrantYellow
-                        )
-                        Text(
-                            text = when (uiState.selectedLanguage) {
-                                SupportedLanguage.ENGLISH -> "Visual Q&A · Real-time Chat"
-                                SupportedLanguage.AFAN_OROMOO -> "Qorannoo Naannoo fi Gaaffii"
-                                SupportedLanguage.AMHARIC -> "የቀጥታ ውይይት እና ጥያቄዎች"
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = AynePureWhite.copy(alpha = 0.85f)
-                        )
-                    }
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    // New Chat / Reset Button
-                    if (uiState.askQuestionHistory.isNotEmpty()) {
-                        IconButton(
-                            onClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                onAction(AyneAction.ClearAskQuestionHistory)
-                            },
-                            modifier = Modifier
-                                .size(36.dp)
-                                .testTag("ask_question_clear_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.Refresh,
-                                contentDescription = when (uiState.selectedLanguage) {
-                                    SupportedLanguage.ENGLISH -> "New Chat"
-                                    SupportedLanguage.AFAN_OROMOO -> "Haaraa Eegali"
-                                    SupportedLanguage.AMHARIC -> "አዲስ ውይይት ጀምር"
-                                },
-                                tint = AyneVibrantYellow,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
-
-                    // Exit / Back Button
-                    OutlinedButton(
-                        onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onAction(AyneAction.ExitCompanionMode)
-                        },
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = AynePureWhite
-                        ),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.testTag("companion_exit_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.companion_exit_desc),
-                            tint = AynePureWhite,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = when (uiState.selectedLanguage) {
-                                SupportedLanguage.ENGLISH -> "Back"
-                                SupportedLanguage.AFAN_OROMOO -> "Duubatti"
-                                SupportedLanguage.AMHARIC -> "ተመለስ"
-                            },
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            }
-        }
-
-        // 2. Chat Feed: Dedicated Questions & Answers History
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f, fill = false)
-                .heightIn(min = 140.dp, max = 340.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(AyneDarkCard)
-                .padding(8.dp)
-        ) {
-            LazyColumn(
-                state = listState,
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxSize()
-            ) {
-                // Initial welcoming greeting from Assistant
-                item {
-                    val greetingText = uiState.companionGreeting ?: when (uiState.selectedLanguage) {
-                        SupportedLanguage.ENGLISH -> "Hello! How can I help you? Please ask your question, I am listening."
-                        SupportedLanguage.AFAN_OROMOO -> "Akkam! Maal si gargaaru? Gaaffii kee gaafadhu, sin dhaggeeffadha."
-                        SupportedLanguage.AMHARIC -> "ሰላም! ምን ልርዳዎት? ጥያቄዎን ይጠይቁ፤ እየሰማሁ ነው።"
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Start
-                    ) {
-                        Surface(
-                            shape = RoundedCornerShape(topStart = 4.dp, topEnd = 14.dp, bottomStart = 14.dp, bottomEnd = 14.dp),
-                            color = AynePureBlack,
-                            border = BorderStroke(1.dp, AyneVibrantYellow.copy(alpha = 0.8f)),
-                            modifier = Modifier.widthIn(max = 300.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(10.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = greetingText,
-                                    color = AynePureWhite,
-                                    fontSize = 14.sp,
-                                    lineHeight = 20.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                IconButton(
-                                    onClick = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        onAction(AyneAction.RepeatLastAnswer)
-                                    },
-                                    modifier = Modifier.size(28.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.VolumeUp,
-                                        contentDescription = "Repeat",
-                                        tint = AyneVibrantYellow,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                items(uiState.askQuestionHistory) { turn ->
-                    if (turn.role == "user") {
-                        // User Question Bubble (Right)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.End
-                        ) {
-                            Surface(
-                                shape = RoundedCornerShape(topStart = 14.dp, topEnd = 4.dp, bottomStart = 14.dp, bottomEnd = 14.dp),
-                                color = AyneVibrantYellow,
-                                modifier = Modifier.widthIn(max = 280.dp)
-                            ) {
-                                Text(
-                                    text = turn.text,
-                                    color = AyneOnYellow,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    modifier = Modifier.padding(10.dp)
-                                )
-                            }
-                        }
-                    } else {
-                        // AI Answer Bubble (Left)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.Start
-                        ) {
-                            Surface(
-                                shape = RoundedCornerShape(topStart = 4.dp, topEnd = 14.dp, bottomStart = 14.dp, bottomEnd = 14.dp),
-                                color = AynePureBlack,
-                                border = BorderStroke(1.dp, AyneVibrantYellow.copy(alpha = 0.8f)),
-                                modifier = Modifier.widthIn(max = 300.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(10.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = turn.text,
-                                        color = AynePureWhite,
-                                        fontSize = 14.sp,
-                                        lineHeight = 20.sp,
-                                        fontWeight = FontWeight.Normal,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    IconButton(
-                                        onClick = {
-                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                            onAction(AyneAction.RepeatLastAnswer)
-                                        },
-                                        modifier = Modifier.size(28.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.AutoMirrored.Filled.VolumeUp,
-                                            contentDescription = "Repeat",
-                                            tint = AyneVibrantYellow,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Live Speech Transcription
-                if (!uiState.liveTranscription.isNullOrBlank() && uiState.isRecordingVoice) {
-                    item {
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = AynePureBlack,
-                            border = BorderStroke(1.dp, AyneVibrantYellow),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.Mic,
-                                    contentDescription = null,
-                                    tint = AyneVibrantYellow,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = uiState.liveTranscription ?: "",
-                                    color = AyneVibrantYellow,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // 3. Accessible Microphone Button
-        val isRecording = uiState.isRecordingVoice
-        Button(
-            onClick = {
-                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                onSpeakClick()
-            },
-            colors = ButtonDefaults.buttonColors(
-                containerColor = if (isRecording) AynePureWhite else AyneVibrantYellow,
-                contentColor = AyneOnYellow
-            ),
-            shape = RoundedCornerShape(16.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 54.dp)
-                .testTag("companion_mic_button")
-                .semantics {
-                    role = Role.Button
-                    contentDescription = if (isRecording) {
-                        "Recording voice question. Tap to submit or press Volume minus."
-                    } else {
-                        "Tap to speak your question or press Volume minus."
-                    }
-                }
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
-            ) {
-                Icon(
-                    imageVector = if (isRecording) Icons.Filled.Stop else Icons.Filled.Mic,
-                    contentDescription = null,
-                    tint = if (isRecording) AynePureBlack else AyneOnYellow,
-                    modifier = Modifier.size(24.dp)
-                )
-                Spacer(modifier = Modifier.width(10.dp))
-                Text(
-                    text = if (isRecording) {
-                        when (uiState.selectedLanguage) {
-                            SupportedLanguage.ENGLISH -> "Listening… Tap to Submit (or Volume−)"
-                            SupportedLanguage.AFAN_OROMOO -> "Dhaggeeffachaa jira… Xumuruuf tuqi (Volume−)"
-                            SupportedLanguage.AMHARIC -> "እያዳመጥኩ ነው… ለመጨረስ ይጫኑ (ወይም Volume−)"
-                        }
-                    } else {
-                        when (uiState.selectedLanguage) {
-                            SupportedLanguage.ENGLISH -> "Tap to Speak (or Volume−)"
-                            SupportedLanguage.AFAN_OROMOO -> "Dubbachuuf tuqi (Volume−)"
-                            SupportedLanguage.AMHARIC -> "ለመናገር ይጫኑ (ወይም Volume−)"
-                        }
-                    },
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp,
-                    color = if (isRecording) AynePureBlack else AyneOnYellow
-                )
-            }
-        }
-
-        // 4. Accessible Text Input for Typing Questions
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            OutlinedTextField(
-                value = typedQuestion,
-                onValueChange = { typedQuestion = it },
-                placeholder = {
-                    Text(
-                        text = when (uiState.selectedLanguage) {
-                            SupportedLanguage.ENGLISH -> "Type question or topic…"
-                            SupportedLanguage.AFAN_OROMOO -> "Gaaffii kee barreessi…"
-                            SupportedLanguage.AMHARIC -> "ጥያቄ እዚህ ይፃፉ…"
-                        },
-                        color = AynePureWhite.copy(alpha = 0.5f),
-                        fontSize = 13.sp
-                    )
-                },
-                singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = AyneVibrantYellow,
-                    unfocusedBorderColor = AynePureWhite.copy(alpha = 0.6f),
-                    focusedTextColor = AynePureWhite,
-                    unfocusedTextColor = AynePureWhite,
-                    cursorColor = AyneVibrantYellow
-                ),
-                keyboardOptions = KeyboardOptions(
-                    imeAction = ImeAction.Send
-                ),
-                keyboardActions = KeyboardActions(
-                    onSend = {
-                        val trimmed = typedQuestion.trim()
-                        if (trimmed.isNotBlank()) {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onAction(AyneAction.SubmitAskQuestion(trimmed))
-                            typedQuestion = ""
-                        }
-                    }
-                ),
-                modifier = Modifier
-                    .weight(1f)
-                    .testTag("companion_text_input")
-            )
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            Button(
-                onClick = {
-                    val trimmed = typedQuestion.trim()
-                    if (trimmed.isNotBlank()) {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onAction(AyneAction.SubmitAskQuestion(trimmed))
-                        typedQuestion = ""
-                    }
-                },
-                enabled = typedQuestion.isNotBlank(),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = AyneVibrantYellow,
-                    contentColor = AyneOnYellow,
-                    disabledContainerColor = AyneDarkCard,
-                    disabledContentColor = AynePureWhite.copy(alpha = 0.4f)
-                ),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier
-                    .size(52.dp)
-                    .testTag("companion_send_button")
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.Send,
-                    contentDescription = stringResource(R.string.companion_send_button),
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-        }
-    }
+    )
 }
 
 // Backward-compatibility alias for screens importing AyneCompanionPanel
