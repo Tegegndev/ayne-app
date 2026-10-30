@@ -89,6 +89,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -141,6 +142,7 @@ import com.example.ui.theme.AynePureWhite
 import com.example.ui.theme.AyneTheme
 import com.example.ui.theme.AyneVibrantYellow
 import com.example.util.AudioPlaybackHelper
+import com.example.util.PermissionPromptSpeaker
 import com.example.util.CameraCaptureHelper
 import com.example.util.Pcm16Decoder
 import com.example.util.ProcessingFeedbackHelper
@@ -1941,9 +1943,27 @@ fun AyneAppScreen(
     val uiState by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
+    val permissionPromptSpeaker = remember(context) { PermissionPromptSpeaker(context) }
+
+    fun permissionRationale(camera: Boolean): String {
+        val resource = when (uiState.selectedLanguage) {
+            SupportedLanguage.AMHARIC -> if (camera) R.string.camera_permission_rationale_am else R.string.mic_permission_rationale_am
+            SupportedLanguage.AFAN_OROMOO -> if (camera) R.string.camera_permission_rationale_om else R.string.mic_permission_rationale_om
+            SupportedLanguage.ENGLISH -> if (camera) R.string.camera_permission_rationale_en else R.string.mic_permission_rationale_en
+        }
+        return context.getString(resource)
+    }
+
+    DisposableEffect(permissionPromptSpeaker) {
+        onDispose { permissionPromptSpeaker.shutdown() }
+    }
 
     LaunchedEffect(context) {
         viewModel.initFeedbackHelper(context)
+    }
+
+    LaunchedEffect(uiState.baseUrl) {
+        permissionPromptSpeaker.preload(uiState.baseUrl)
     }
 
     // CameraX instance
@@ -2022,7 +2042,14 @@ fun AyneAppScreen(
             onGranted()
         } else {
             onCameraGrantedAction = onGranted
-            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+            permissionPromptSpeaker.speakThen(
+                permissionRationale(camera = true),
+                uiState.selectedLanguage.code,
+                "camera",
+                uiState.baseUrl
+            ) {
+                cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+            }
         }
     }
 
@@ -2037,7 +2064,14 @@ fun AyneAppScreen(
             onGranted()
         } else {
             onMicGrantedAction = onGranted
-            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            permissionPromptSpeaker.speakThen(
+                permissionRationale(camera = false),
+                uiState.selectedLanguage.code,
+                "microphone",
+                uiState.baseUrl
+            ) {
+                micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            }
         }
     }
 

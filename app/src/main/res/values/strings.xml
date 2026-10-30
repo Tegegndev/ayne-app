@@ -29,6 +29,12 @@
     <string name="camera_permission_denied">Camera permission is required to describe surroundings and read text. Please grant camera access.</string>
     <string name="mic_permission_granted">Microphone permission granted. Ready to listen.</string>
     <string name="mic_permission_denied">Microphone permission is required to ask questions by voice. Please grant microphone access.</string>
+    <string name="camera_permission_rationale_en">Camera access lets Ayne describe your surroundings and read text. The app will open the camera only when you choose one of those features.</string>
+    <string name="camera_permission_rationale_am">ካሜራው ዙሪያዎን ለማስረዳትና ጽሑፍ ለማንበብ ይረዳል። አፑ ካሜራውን የሚከፍተው እነዚህን ባህሪያት ሲመርጡ ብቻ ነው።</string>
+    <string name="camera_permission_rationale_om">Kameraan naannoo kee ibsuu fi barruu dubbisuuf Ayne gargaara. Yeroo tajaajiloota kana keessaa tokko filattu qofa kaameraan ni banama.</string>
+    <string name="mic_permission_rationale_en">Microphone access lets you ask Ayne a question by speaking. Your voice is recorded only when you start a voice question.</string>
+    <string name="mic_permission_rationale_am">ማይክሮፎኑ በድምፅ ጥያቄ እንዲጠይቁ ያስችልዎታል። የድምፅ ጥያቄ ሲጀምሩ ብቻ ድምፅዎ ይቀረጻል።</string>
+    <string name="mic_permission_rationale_om">Mikirofoonii fayyadamuun gaaffii kee sagaleedhaan Ayne gaafachuu dandeessa. Sagaleen kee yeroo gaaffii sagalee jalqabdu qofa waraabama.</string>
     
     <string name="analyzing_surroundings">Analyzing surroundings… Processing audio tone active. Please hold steady.</string>
     <string name="reading_text_progress">Analyzing and reading text… Processing audio tone active. Please hold steady.</string>
