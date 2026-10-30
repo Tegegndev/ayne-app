@@ -427,6 +427,18 @@ class AyneViewModel(
         }
     }
 
+    /**
+     * Playback-only interruption used by hardware volume key presses: silences
+     * the speaker and aborts any in-flight Mode B turn (whose answer would
+     * otherwise come back and talk over the user's next action), but leaves
+     * any active voice recording untouched, so the key-up can submit the take.
+     */
+    fun stopPlaybackOnly() {
+        audioPlaybackHelper.stop()
+        processingFeedbackHelper?.stopWorkingFeedback()
+        realtimeClient?.cancel()
+    }
+
     fun playTapEarcon() {
         processingFeedbackHelper?.playInstantTapEarcon()
     }
@@ -1734,9 +1746,11 @@ class MainActivity : ComponentActivity() {
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         if (event == null) return super.onKeyDown(keyCode, event)
 
-        // Stop any currently playing speech immediately on ANY volume key (Barge-In)
+        // Stop any currently playing speech immediately on ANY volume key
+        // (speaker barge-in) — but do NOT kill an active voice recording:
+        // a Volume− press while recording means "submit this take".
         if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
-            viewModel.bargeIn()
+            viewModel.stopPlaybackOnly()
         }
 
         when (keyCode) {
@@ -1790,6 +1804,13 @@ class MainActivity : ComponentActivity() {
             }
             KeyEvent.KEYCODE_VOLUME_DOWN -> {
                 if (!isVolumeDownLongPress && (System.currentTimeMillis() - volumeDownPressTime < 600)) {
+                    // While a voice question is recording, Volume− ALWAYS submits
+                    // the take immediately — no double-tap interpretation, so the
+                    // user's recorded question can never be lost or replayed over.
+                    if (viewModel.uiState.value.isRecordingVoice) {
+                        viewModel.stopAndSubmitVoiceRecording(this@MainActivity)
+                        return true
+                    }
                     val now = System.currentTimeMillis()
                     if (now - lastVolumeDownReleaseTime < 350) {
                         // Double-tap on Volume-: Instant memory replay of last spoken audio buffer with 0 network calls!
@@ -1945,7 +1966,9 @@ fun AyneAppScreen(
     }
 
     fun captureAskQuestionScene() {
-        viewModel.bargeIn()
+        // Stop the speaker only: capturing a photo must never destroy a voice
+        // question the user is still recording.
+        viewModel.stopPlaybackOnly()
         viewModel.playTapEarcon()
         requireCameraPermission {
             coroutineScope.launch {
