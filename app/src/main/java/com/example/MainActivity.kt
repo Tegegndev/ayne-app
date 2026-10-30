@@ -110,6 +110,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -123,6 +124,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -3490,28 +3493,46 @@ fun LanguageSelector(
 
 /**
  * First-launch language picker shown once, voiced by the launcher's TTS
- * announcement. Buttons carry English content descriptions with position
- * hints because TalkBack cannot read Ethiopic script out loud.
+ * announcement. Full-screen welcome art as the background; buttons carry
+ * English content descriptions with position hints because TalkBack cannot
+ * read Ethiopic script out loud.
  */
 @Composable
 fun FirstLaunchLanguagePickerDialog(
     onLanguageChosen: (SupportedLanguage) -> Unit,
     onDismiss: () -> Unit
 ) {
-    AlertDialog(
+    Dialog(
         onDismissRequest = onDismiss,
-        // Multi-language picker has no single "confirm": each language button
-        // confirms itself, so the required button slot stays empty.
-        confirmButton = {},
-        shape = RoundedCornerShape(20.dp),
-        containerColor = AynePureBlack,
-        titleContentColor = AyneVibrantYellow,
-        textContentColor = AynePureWhite,
-        modifier = Modifier
-            .border(2.dp, AyneVibrantYellow, RoundedCornerShape(20.dp))
-            .testTag("language_picker_dialog"),
-        title = {
-            Column {
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(AynePureBlack)
+                .testTag("language_picker_dialog")
+        ) {
+            Image(
+                painter = painterResource(id = R.drawable.welcome_picker_background),
+                contentDescription = null, // decorative: voiced by the TTS announcement instead
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+
+            // Light scrim so text and buttons stay readable over the artwork.
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(AynePureBlack.copy(alpha = 0.25f))
+            )
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 24.dp, vertical = 32.dp),
+                verticalArrangement = Arrangement.SpaceBetween,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
                 Text(
                     text = "ቋንቋ ይምረጡ",
                     style = MaterialTheme.typography.titleLarge,
@@ -3524,31 +3545,38 @@ fun FirstLaunchLanguagePickerDialog(
                     fontWeight = FontWeight.Medium,
                     color = AynePureWhite
                 )
-            }
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                FirstLaunchLanguageButton(
-                    label = "አማርኛ",
-                    hint = "Amharic, first button",
-                    tag = "language_button_am",
-                    onChosen = { onLanguageChosen(SupportedLanguage.AMHARIC) }
-                )
-                FirstLaunchLanguageButton(
-                    label = "Afaan Oromoo",
-                    hint = "Afaan Oromoo, middle button",
-                    tag = "language_button_om",
-                    onChosen = { onLanguageChosen(SupportedLanguage.AFAN_OROMOO) }
-                )
-                FirstLaunchLanguageButton(
-                    label = "English",
-                    hint = "English, last button",
-                    tag = "language_button_en",
-                    onChosen = { onLanguageChosen(SupportedLanguage.ENGLISH) }
-                )
+
+                // The illustration sits between the titles and the buttons;
+                // the weighing spacer pushes the buttons into the artwork's
+                // quieter rippled area near the bottom.
+                Spacer(modifier = Modifier.weight(1f))
+
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    FirstLaunchLanguageButton(
+                        label = "አማርኛ",
+                        hint = "Amharic, first button",
+                        tag = "language_button_am",
+                        onChosen = { onLanguageChosen(SupportedLanguage.AMHARIC) }
+                    )
+                    FirstLaunchLanguageButton(
+                        label = "Afaan Oromoo",
+                        hint = "Afaan Oromoo, middle button",
+                        tag = "language_button_om",
+                        onChosen = { onLanguageChosen(SupportedLanguage.AFAN_OROMOO) }
+                    )
+                    FirstLaunchLanguageButton(
+                        label = "English",
+                        hint = "English, last button",
+                        tag = "language_button_en",
+                        onChosen = { onLanguageChosen(SupportedLanguage.ENGLISH) }
+                    )
+                }
             }
         }
-    )
+    }
 }
 
 @Composable
