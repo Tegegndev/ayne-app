@@ -966,20 +966,21 @@ class AyneViewModel(
                     // Inside the ask tab, not yet recording → start recording.
                     startVoiceRecording(context)
                 } else {
-                    // Anywhere else (home / vision): Volume− is a FOLLOW-UP
-                    // question, never a bare recording — and its silence
-                    // fallback must therefore never fire a describe. Use the
-                    // same follow-up entry as the home-screen volume path:
-                    // already-listening orb with history retained, or a fresh
-                    // greet-and-ask session only when nothing is in memory.
-                    val hasContext = _uiState.value.lockedImageBase64 != null ||
-                        _uiState.value.activeSessionId != null ||
-                        activeSessionId != null ||
-                        _uiState.value.askQuestionHistory.isNotEmpty()
-                    if (hasContext) {
-                        openAskFollowUp(context)
-                    } else {
-                        openAskQuestion(context)
+                    // Anywhere else (home / vision): Volume− is SEE & DESCRIBE.
+                    // It never starts recordings or opens ask sessions here;
+                    // its old silence-fallback describe path was exactly the
+                    // "Volume− messes with describe" bug.
+                    viewModelScope.launch {
+                        val frame = try {
+                            frameProvider?.invoke()
+                        } catch (_: Throwable) {
+                            null
+                        }
+                        if (frame != null) {
+                            executeVisionRequest(context, frame)
+                        } else {
+                            _userMessage.tryEmit(context.getString(R.string.no_scene_in_memory))
+                        }
                     }
                 }
             }
@@ -2095,22 +2096,10 @@ fun AyneAppScreen(
                 viewModel.startVoiceRecording(context)
             }
         } else {
-            // On main screen: Volume− is a FOLLOW-UP question when a scene or
-            // previous ask turn exists — open the voice screen already
-            // listening, with no fresh greeting. Only with nothing in memory
-            // does it start a brand-new ask session (with the greeting).
-            viewModel.bargeIn()
-            viewModel.playTapEarcon()
-            val hasContext = uiState.lockedImageBase64 != null ||
-                uiState.activeSessionId != null ||
-                uiState.askQuestionHistory.isNotEmpty()
-            if (hasContext) {
-                requireMicPermission {
-                    viewModel.openAskFollowUp(context)
-                }
-            } else {
-                viewModel.openAskQuestion(context)
-            }
+            // On main screen: Volume− is SEE & DESCRIBE — capture a frame and
+            // describe it aloud, exactly like the describe button. Volume−
+            // never opens or creates an ask-question session.
+            triggerDescribeSurroundings()
         }
     }
 
