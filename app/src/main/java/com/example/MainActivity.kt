@@ -2197,12 +2197,31 @@ fun AyneAppScreen(
     }
 
     /**
-     * Launch-time permission flow. A blind user should not discover a missing
-     * permission on their first volume-key press: ask for whatever is missing
-     * right on startup, narrated by the permission-guidance audio. Already
-     * granted permissions are never re-asked, so normal starts stay silent.
+     * Launch-time flow: on a first launch the language choice comes first, so
+     * the permission narration that follows is spoken in the user's language.
+     * Missing permissions are then asked one after another, each narrated by
+     * the permission-guidance audio. Already granted permissions are never
+     * re-asked, so normal starts stay silent.
      */
     LaunchedEffect(Unit) {
+        // Let the first frame render and the audio helpers settle before speaking.
+        delay(600)
+
+        // First launch: guide the user through language selection once. TalkBack
+        // cannot read Ethiopic script, so the dialog is described via device TTS
+        // using English position hints.
+        if (uiState.isFirstLaunch) {
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            showFirstLaunchPicker = true
+            permissionPromptSpeaker.announce(
+                context.getString(R.string.language_picker_announcement),
+                "en"
+            )
+            // Wait until the user picks a language (closing happens on pick,
+            // back-press defers the choice and re-opens the picker next launch).
+            snapshotFlow { showFirstLaunchPicker }.first { it == false }
+        }
+
         val hasCamera = ContextCompat.checkSelfPermission(
             context,
             Manifest.permission.CAMERA
@@ -2212,9 +2231,6 @@ fun AyneAppScreen(
             Manifest.permission.RECORD_AUDIO
         ) == PackageManager.PERMISSION_GRANTED
         if (hasCamera && hasMic) return@LaunchedEffect
-
-        // Let the first frame render and the audio helpers settle before speaking.
-        delay(600)
 
         if (!hasCamera) {
             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -2250,21 +2266,6 @@ fun AyneAppScreen(
                     micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                 }
             }
-        }
-
-        // First launch: guide the user through language selection once, after the
-        // permission requests are settled. TalkBack cannot read Ethiopic script,
-        // so the dialog is described via device TTS using English position hints.
-        if (uiState.isFirstLaunch) {
-            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-            showFirstLaunchPicker = true
-            permissionPromptSpeaker.announce(
-                context.getString(R.string.language_picker_announcement),
-                "en"
-            )
-            // Wait until the user picks a language (closing happens on pick,
-            // back-press defers the choice and re-opens the picker next launch).
-            snapshotFlow { showFirstLaunchPicker }.first { it == false }
         }
     }
 
