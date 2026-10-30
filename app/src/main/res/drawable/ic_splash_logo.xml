@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ayne mark used by the launch window and the Android 12+ splash screen. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp"
+    android:height="120dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M28,54 C40,37 68,37 80,54 C68,71 40,71 28,54 Z"
+        android:strokeColor="#FFD600"
+        android:strokeWidth="4.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M54,42.5 L63.96,48.25 L63.96,59.75 L54,65.5 L44.04,59.75 L44.04,48.25 Z"
+        android:strokeColor="#FFD600"
+        android:strokeWidth="3.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <path
+        android:fillColor="#FFD600"
+        android:pathData="M54,54m-3.8,0a3.8,3.8 0 1,1 7.6,0a3.8,3.8 0 1,1 -7.6,0" />
+</vector>

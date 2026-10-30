@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" role="img" aria-label="Ayne">
+  <title>Ayne brand mark</title>
+  <rect width="108" height="108" fill="#000000"/>
+  <path d="M28,54 C40,37 68,37 80,54 C68,71 40,71 28,54 Z" fill="none" stroke="#FFD600" stroke-width="4.5" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M54,42.5 L63.96,48.25 L63.96,59.75 L54,65.5 L44.04,59.75 L44.04,48.25 Z" fill="none" stroke="#FFD600" stroke-width="3.6" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="54" cy="54" r="3.8" fill="#FFD600"/>
+</svg>
