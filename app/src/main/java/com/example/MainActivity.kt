@@ -114,6 +114,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
@@ -650,6 +651,20 @@ class AyneViewModel(
     private suspend fun submitSilenceFallback(context: Context) {
         if (_uiState.value.isBusy) return
 
+        // This scene already has a spoken description → do NOT describe it
+        // again. Re-describing on every silent Volume− press made the
+        // assistant repeat the same description over and over. Ask the user
+        // to actually speak instead.
+        if (_uiState.value.conversationHistory.isNotEmpty()) {
+            val prompt = when (_uiState.value.selectedLanguage) {
+                SupportedLanguage.ENGLISH -> "I didn't hear your question — press Volume− and speak after the tone."
+                SupportedLanguage.AFAN_OROMOO -> "Gaaffii kee hin dhageenye — Volume gadi dhiibi erga sagalee booda dubbachiisi."
+                SupportedLanguage.AMHARIC -> "ጥያቄዎን አልሰማሁም — ድምፁን ከሰሙ በኋላ በድምፅ መቀነሻው ተጭነው ይናገሩ።"
+            }
+            _userMessage.tryEmit(prompt)
+            return
+        }
+
         val freshFrame = try {
             frameProvider?.invoke()
         } catch (e: Throwable) {
@@ -1035,6 +1050,7 @@ class AyneViewModel(
                 state.customVoice
             }
             var receivedVision = false
+            var spokenThisTurn: String? = null
             val audioChunks = StringBuilder()
 
             // 1. Attempt ultra-low latency SSE streaming (~500ms vision arrival)
@@ -1068,6 +1084,7 @@ class AyneViewModel(
                         ConversationTurn("user", "Describe my surroundings"),
                         ConversationTurn("model", chosenAnswer)
                     )
+                    spokenThisTurn = chosenAnswer
 
                     _uiState.update {
                         it.copy(
@@ -1108,11 +1125,13 @@ class AyneViewModel(
                     if (fullAudio.isNotBlank()) {
                         _uiState.update { it.copy(lastAudioBase64 = fullAudio) }
                         audioPlaybackHelper.setLastConsolidatedAudio(context, fullAudio)
-                    } else {
-                        val answerToSpeak = _uiState.value.lastAnswer
-                        if (!answerToSpeak.isNullOrBlank()) {
-                            synthesizeAndPlayTtsFallback(context, answerToSpeak, _uiState.value)
-                        }
+                    } else if (receivedVision && !spokenThisTurn.isNullOrBlank()) {
+                        // Stream gave text but no audio → synthesize THIS turn's answer.
+                        synthesizeAndPlayTtsFallback(context, spokenThisTurn!!, _uiState.value)
+                    } else if (!receivedVision) {
+                        // Nothing arrived this turn: never fall back to speaking a
+                        // PREVIOUS answer — that made the assistant repeat itself.
+                        _userMessage.tryEmit(context.getString(R.string.snackbar_no_answer))
                     }
                 }
             )
@@ -1262,6 +1281,7 @@ class AyneViewModel(
             val sendSessionId = sid
 
             var receivedAnswer = false
+            var spokenThisTurn: String? = null
             var currentTranscribedQuery: String? = textQuery
             val audioChunks = StringBuilder()
 
@@ -1301,6 +1321,7 @@ class AyneViewModel(
                             SupportedLanguage.AMHARIC -> ansEv.amharic.ifBlank { ansEv.english }
                         }
                     }.cleanLabelPrefix(prefLang)
+                    spokenThisTurn = chosenAnswer
 
                     val userTurn = currentTranscribedQuery?.takeIf { it.isNotBlank() } ?: textQuery ?: "Question"
                     val updatedAskHistory = (state.askQuestionHistory + listOf(
@@ -1389,11 +1410,12 @@ class AyneViewModel(
                     if (fullAudio.isNotBlank()) {
                         _uiState.update { it.copy(lastAudioBase64 = fullAudio) }
                         audioPlaybackHelper.setLastConsolidatedAudio(context, fullAudio)
-                    } else {
-                        val answerToSpeak = _uiState.value.askQuestionLastAnswer ?: _uiState.value.lastAnswer
-                        if (!answerToSpeak.isNullOrBlank()) {
-                            synthesizeAndPlayTtsFallback(context, answerToSpeak, _uiState.value)
-                        }
+                    } else if (receivedAnswer && !spokenThisTurn.isNullOrBlank()) {
+                        synthesizeAndPlayTtsFallback(context, spokenThisTurn!!, _uiState.value)
+                    } else if (!receivedAnswer) {
+                        // No answer for THIS question — never speak the previous
+                        // turn's answer again (the "AI repeats itself" bug).
+                        _userMessage.tryEmit(context.getString(R.string.snackbar_no_answer))
                     }
                 }
             )
@@ -2123,21 +2145,42 @@ fun AyneAppScreen(
         snackbarHost = {
             SnackbarHost(
                 hostState = snackbarHostState,
-                modifier = Modifier
-                    .padding(16.dp)
+                modifier = Modifier.padding(
+                    horizontal = 16.dp,
+                    vertical = if (uiState.isCompanionMode) 64.dp else 16.dp
+                )
                     .testTag("snackbar_host")
             ) { data ->
-                Snackbar(
-                    containerColor = AyneVibrantYellow,
-                    contentColor = AyneOnYellow,
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Text(
-                        text = data.visuals.message,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = AyneOnYellow,
-                        fontWeight = FontWeight.Bold
-                    )
+                if (uiState.isCompanionMode) {
+                    // Compact, quiet toast on the fullscreen voice screen —
+                    // the loud yellow bar covered the orb and fought with the
+                    // bottom hint for attention.
+                    Snackbar(
+                        containerColor = AyneDarkCard.copy(alpha = 0.95f),
+                        contentColor = AynePureWhite,
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text(
+                            text = data.visuals.message,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = AynePureWhite,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                } else {
+                    Snackbar(
+                        containerColor = AyneVibrantYellow,
+                        contentColor = AyneOnYellow,
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            text = data.visuals.message,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = AyneOnYellow,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
         }
