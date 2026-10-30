@@ -687,18 +687,38 @@ class AyneViewModel(
         val client = realtimeClient ?: AddisRealtimeClient().also { realtimeClient = it }
 
         viewModelScope.launch {
-            // 1. Decode AAC/M4A → 16 kHz mono PCM16 (off the main thread).
+            // 1. Capture the CURRENT camera view: every question carries the
+            //    freshest image so visual questions stay context-aware. Used by
+            //    the session-based fallback today, and by Mode B once the
+            //    gateway forwards it upstream.
+            val freshFrame = try {
+                frameProvider?.invoke()
+            } catch (_: Throwable) {
+                null
+            }
+            if (freshFrame != null) {
+                _uiState.update {
+                    it.copy(lockedImageBase64 = freshFrame, lastCapturedBase64 = freshFrame)
+                }
+            }
+
+            // 2. Decode AAC/M4A → 16 kHz mono PCM16 (off the main thread).
             val pcm16 = withContext(Dispatchers.Default) {
                 Pcm16Decoder.decodeTo16kMonoPcm16(context, voiceBase64)
             }
             if (pcm16 == null) {
                 _uiState.update { it.copy(isBusy = false) }
-                executeFollowUpRequest(context, voiceBase64 = voiceBase64, textQuery = null)
+                executeFollowUpRequest(
+                    context,
+                    voiceBase64 = voiceBase64,
+                    textQuery = null,
+                    freshImageBase64 = freshFrame
+                )
                 return@launch
             }
             val audioBase64 = android.util.Base64.encodeToString(pcm16, android.util.Base64.NO_WRAP)
 
-            // 2. Stream the turn.
+            // 3. Stream the turn.
             client.onComplete = { userText, assistantText, mp3Base64 ->
                 viewModelScope.launch {
                     val turns = buildList {
@@ -719,7 +739,12 @@ class AyneViewModel(
                         // also records lastAudioFile so "Repeat last answer" works.
                         audioPlaybackHelper.playBase64Audio(context, mp3Base64)
                     } else if (_uiState.value.isAskQuestionOpen) {
-                        executeFollowUpRequest(context, voiceBase64 = voiceBase64, textQuery = null)
+                        executeFollowUpRequest(
+                            context,
+                            voiceBase64 = voiceBase64,
+                            textQuery = null,
+                            freshImageBase64 = freshFrame
+                        )
                     }
                 }
             }
@@ -727,14 +752,20 @@ class AyneViewModel(
                 viewModelScope.launch {
                     _uiState.update { it.copy(isBusy = false) }
                     showMessage("Realtime voice unavailable ($message) — using standard mode")
-                    executeFollowUpRequest(context, voiceBase64 = voiceBase64, textQuery = null)
+                    executeFollowUpRequest(
+                        context,
+                        voiceBase64 = voiceBase64,
+                        textQuery = null,
+                        freshImageBase64 = freshFrame
+                    )
                 }
             }
             client.sendVoiceTurn(
                 audioBase64 = audioBase64,
                 language = language,
                 voice = voice,
-                systemPrompt = systemPrompt
+                systemPrompt = systemPrompt,
+                image = freshFrame
             )
         }
     }

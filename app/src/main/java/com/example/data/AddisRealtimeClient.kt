@@ -66,7 +66,8 @@ class AddisRealtimeClient(
         audioBase64: String,
         language: String,
         voice: String? = null,
-        systemPrompt: String? = null
+        systemPrompt: String? = null,
+        image: String? = null
     ) {
         cancel() // any in-flight turn is dead the moment a new one starts
         cancelled.set(false)
@@ -76,6 +77,9 @@ class AddisRealtimeClient(
             put("language", language)
             if (!voice.isNullOrBlank()) put("voice", voice)
             if (!systemPrompt.isNullOrBlank()) put("systemPrompt", systemPrompt)
+            // Current camera frame so visual questions have context. Ignored
+            // by servers that don't accept it yet; used once they do.
+            if (!image.isNullOrBlank()) put("image", image)
         }
         val request = Request.Builder()
             .url(streamUrl)
