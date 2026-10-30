@@ -120,6 +120,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewModelScope
+import com.example.data.AddisRealtimeClient
 import com.example.data.ConversationTurn
 import com.example.data.cleanLabelPrefix
 import com.example.data.hasRawJsonArtifacts
@@ -137,8 +138,10 @@ import com.example.ui.theme.AyneTheme
 import com.example.ui.theme.AyneVibrantYellow
 import com.example.util.AudioPlaybackHelper
 import com.example.util.CameraCaptureHelper
+import com.example.util.Pcm16Decoder
 import com.example.util.ProcessingFeedbackHelper
 import com.example.util.VoiceRecorderHelper
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -150,6 +153,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 // ==========================================
 // Domain & State Models
@@ -353,6 +357,7 @@ class AyneViewModel(
 ) : ViewModel() {
     private var processingFeedbackHelper: ProcessingFeedbackHelper? = null
     private var voiceRecorderHelper: VoiceRecorderHelper? = null
+    private var realtimeClient: AddisRealtimeClient? = null
     private var recordingJob: Job? = null
     private var activeSessionId: String? = null
 
@@ -416,6 +421,7 @@ class AyneViewModel(
     fun bargeIn() {
         audioPlaybackHelper.stop()
         processingFeedbackHelper?.stopWorkingFeedback()
+        realtimeClient?.cancel()  // abort any in-flight Mode B voice turn
         if (_uiState.value.isRecordingVoice) {
             cancelVoiceRecording()
         }
@@ -477,7 +483,7 @@ class AyneViewModel(
 
     fun exitCompanionMode() {
         bargeIn()
-        _uiState.update { it.copy(isCompanionMode = false, isAskQuestionOpen = false) }
+        _uiState.update { it.copy(isCompanionMode = false, isAskQuestionOpen = false, isBusy = false) }
         playTapEarcon()
         _userMessage.tryEmit("Switched to Vision mode")
     }
@@ -488,7 +494,8 @@ class AyneViewModel(
             it.copy(
                 askQuestionHistory = emptyList(),
                 askQuestionSessionId = null,
-                askQuestionLastAnswer = null
+                askQuestionLastAnswer = null,
+                isBusy = false
             )
         }
         playTapEarcon()
@@ -634,18 +641,102 @@ class AyneViewModel(
             viewModelScope.launch { submitSilenceFallback(context) }
             return
         }
-        executeFollowUpRequest(
-            context = context,
-            voiceBase64 = voiceBase64,
-            textQuery = null
-        )
+        if (_uiState.value.isAskQuestionOpen) {
+            // Companion mode: use the realtime Mode B voice turn (Addis AI
+            // STT + conversational reply + streamed speech), falling back to
+            // the session-based ask-question endpoint on any failure.
+            startRealtimeTurn(context, voiceBase64)
+        } else {
+            executeFollowUpRequest(
+                context = context,
+                voiceBase64 = voiceBase64,
+                textQuery = null
+            )
+        }
     }
 
     fun cancelVoiceRecording() {
         recordingJob?.cancel()
         recordingJob = null
         voiceRecorderHelper?.cancelRecording()
-        _uiState.update { it.copy(isRecordingVoice = false, heardSpeech = false, micLevel = 0f) }
+        // A cancelled recording can orphan an in-flight realtime turn (no
+        // callback will fire after cancel()), so unstick the orb.
+        _uiState.update { it.copy(isRecordingVoice = false, heardSpeech = false, micLevel = 0f, isBusy = false) }
+    }
+
+    /**
+     * Realtime Mode B voice turn: decodes the recorded clip to 16 kHz mono
+     * PCM16, POSTs it to /api/addis-realtime/stream, accumulates the streamed
+     * MP3 speech, and plays it when the turn completes. Recent conversation
+     * turns ride along in systemPrompt so follow-ups keep their context.
+     * Any failure falls back to the session-based ask-question endpoint.
+     */
+    private fun startRealtimeTurn(context: Context, voiceBase64: String) {
+        val language = _uiState.value.selectedLanguage.code
+        val voice = if (language == "om") "om-abdi" else "am-hamen"
+        val recentHistory = _uiState.value.askQuestionHistory.takeLast(6)
+        val systemPrompt = if (recentHistory.isEmpty()) {
+            null
+        } else {
+            "Previous conversation turns, oldest first. Continue naturally as the assistant:\n" +
+                recentHistory.joinToString("\n") { "${it.role}: ${it.text}" }
+        }
+
+        _uiState.update { it.copy(isBusy = true, liveTranscription = null) } // orb → Thinking
+
+        val client = realtimeClient ?: AddisRealtimeClient().also { realtimeClient = it }
+
+        viewModelScope.launch {
+            // 1. Decode AAC/M4A → 16 kHz mono PCM16 (off the main thread).
+            val pcm16 = withContext(Dispatchers.Default) {
+                Pcm16Decoder.decodeTo16kMonoPcm16(context, voiceBase64)
+            }
+            if (pcm16 == null) {
+                _uiState.update { it.copy(isBusy = false) }
+                executeFollowUpRequest(context, voiceBase64 = voiceBase64, textQuery = null)
+                return@launch
+            }
+            val audioBase64 = android.util.Base64.encodeToString(pcm16, android.util.Base64.NO_WRAP)
+
+            // 2. Stream the turn.
+            client.onComplete = { userText, assistantText, mp3Base64 ->
+                viewModelScope.launch {
+                    val turns = buildList {
+                        if (!userText.isNullOrBlank()) add(ConversationTurn("user", userText))
+                        if (!assistantText.isNullOrBlank()) add(ConversationTurn("assistant", assistantText))
+                    }
+                    _uiState.update {
+                        it.copy(
+                            isBusy = false,
+                            askQuestionHistory = it.askQuestionHistory + turns,
+                            askQuestionLastAnswer = assistantText ?: it.askQuestionLastAnswer,
+                            lastAnswer = assistantText ?: it.lastAnswer,
+                            liveTranscription = null
+                        )
+                    }
+                    if (!mp3Base64.isNullOrBlank()) {
+                        // Playback flips the orb to Speaking via the playback listener;
+                        // also records lastAudioFile so "Repeat last answer" works.
+                        audioPlaybackHelper.playBase64Audio(context, mp3Base64)
+                    } else if (_uiState.value.isAskQuestionOpen) {
+                        executeFollowUpRequest(context, voiceBase64 = voiceBase64, textQuery = null)
+                    }
+                }
+            }
+            client.onError = { message ->
+                viewModelScope.launch {
+                    _uiState.update { it.copy(isBusy = false) }
+                    showMessage("Realtime voice unavailable ($message) — using standard mode")
+                    executeFollowUpRequest(context, voiceBase64 = voiceBase64, textQuery = null)
+                }
+            }
+            client.sendVoiceTurn(
+                audioBase64 = audioBase64,
+                language = language,
+                voice = voice,
+                systemPrompt = systemPrompt
+            )
+        }
     }
 
     fun onAction(context: Context, action: AyneAction) {
