@@ -960,28 +960,22 @@ class AyneViewModel(
             }
             is AyneAction.VolumeFollowUpTriggered -> {
                 if (_uiState.value.isRecordingVoice) {
-                    // While already recording (ask tab), Volume− submits the take.
+                    // While already recording, Volume− submits the take.
                     stopAndSubmitVoiceRecording(context)
                 } else if (_uiState.value.isAskQuestionOpen) {
                     // Inside the ask tab, not yet recording → start recording.
                     startVoiceRecording(context)
+                } else if (_uiState.value.lockedImageBase64 == null &&
+                    _uiState.value.activeSessionId == null && activeSessionId == null
+                ) {
+                    // Nothing described/captured yet — nothing to follow up on.
+                    _userMessage.tryEmit(context.getString(R.string.no_scene_in_memory))
                 } else {
-                    // Anywhere else (home / vision): Volume− is SEE & DESCRIBE.
-                    // It never starts recordings or opens ask sessions here;
-                    // its old silence-fallback describe path was exactly the
-                    // "Volume− messes with describe" bug.
-                    viewModelScope.launch {
-                        val frame = try {
-                            frameProvider?.invoke()
-                        } catch (_: Throwable) {
-                            null
-                        }
-                        if (frame != null) {
-                            executeVisionRequest(context, frame)
-                        } else {
-                            _userMessage.tryEmit(context.getString(R.string.no_scene_in_memory))
-                        }
-                    }
+                    // Home / vision screen: record a follow-up question about
+                    // the current scene + describe history (original Volume−
+                    // job). The old streaming-into-mic bug is fixed upstream
+                    // (cancelActiveApiJob), so describing cannot pollute the mic.
+                    startVoiceRecording(context)
                 }
             }
         }
@@ -2096,10 +2090,15 @@ fun AyneAppScreen(
                 viewModel.startVoiceRecording(context)
             }
         } else {
-            // On main screen: Volume− is SEE & DESCRIBE — capture a frame and
-            // describe it aloud, exactly like the describe button. Volume−
-            // never opens or creates an ask-question session.
-            triggerDescribeSurroundings()
+            // On main screen: Volume− RECORDS a follow-up question about the
+            // current scene (old behavior from the initial voice commits).
+            // The submitted clip goes to the session-based follow-up with the
+            // locked image + describe history, so it continues the see-and-
+            // describe conversation. Silence still falls back to describe.
+            viewModel.bargeIn()
+            requireMicPermission {
+                viewModel.startVoiceRecording(context)
+            }
         }
     }
 
