@@ -15,6 +15,14 @@ class AudioPlaybackHelper {
     @Volatile
     private var isPlayingQueue = false
 
+    /** True once any chunk of the current queue actually started playing. */
+    @Volatile
+    private var queuePlayedAny = false
+
+    /** Consecutive unplayable chunks in a row (reset on every successful play). */
+    @Volatile
+    private var consecutiveChunkFailures = 0
+
     /**
      * Notified whenever audio playback starts or fully stops, so the UI can
      * reflect the "assistant is speaking" state (e.g. the voice orb).
@@ -58,6 +66,11 @@ class AudioPlaybackHelper {
             if (cleanBase64.isBlank()) return
 
             val audioBytes = Base64.decode(cleanBase64, Base64.DEFAULT)
+            if (audioBytes.isEmpty()) {
+                // Streaming servers occasionally emit empty segments; nothing
+                // playable here and nothing worth surfacing to the user.
+                return
+            }
             val ext = if (format.equals("wav", ignoreCase = true)) ".wav" else ".mp3"
             val tempChunkFile = File.createTempFile("mirkuz_chunk_", ext, context.cacheDir).apply {
                 deleteOnExit()
@@ -114,12 +127,15 @@ class AudioPlaybackHelper {
                         // Ignore
                     }
                     releasePlayer()
-                    onError?.invoke("MediaPlayer error in stream chunk: $what, extra: $extra")
+                    onChunkFailure(onError, "MediaPlayer error in stream chunk: $what, extra: $extra")
                     playNextChunkInQueue(onError)
                     true
                 }
                 prepare()
                 start()
+                // This chunk parsed and started: the stream is healthy.
+                queuePlayedAny = true
+                consecutiveChunkFailures = 0
                 notifyPlaybackState(true)
             }
         } catch (e: Exception) {
@@ -127,9 +143,33 @@ class AudioPlaybackHelper {
                 nextFile.delete()
             } catch (ignored: Exception) {}
             releasePlayer()
-            onError?.invoke(e.localizedMessage ?: "Failed to play audio chunk")
+            // Streamed TTS arrives as arbitrary byte slices: a chunk can be a
+            // header fragment or a split MP3 frame that MediaPlayer cannot
+            // parse on its own, so prepare() throws. That chunk is skipped and
+            // the next one usually plays fine — only report a failure when
+            // playback is genuinely dead (nothing played and nothing left).
+            onChunkFailure(
+                onError,
+                e.localizedMessage ?: "Failed to play audio chunk"
+            )
             playNextChunkInQueue(onError)
         }
+    }
+
+    /**
+     * Report an audio failure only if it actually broke playback: silent for
+     * ordinary mid-stream segment skips, loud once it's clear nothing is
+     * playing and nothing is left.
+     */
+    private fun onChunkFailure(onError: ((String) -> Unit)?, message: String) {
+        consecutiveChunkFailures++
+        val queueEmpty = chunkQueue.isEmpty()
+        if (!queuePlayedAny && queueEmpty && consecutiveChunkFailures >= 2) {
+            onError?.invoke("Audio stream unplayable ($message)")
+        } else if (!queuePlayedAny && queueEmpty) {
+            onError?.invoke("Skipped unplayable audio segment ($message)")
+        }
+        // Otherwise: a later chunk will play — don't scare the user.
     }
 
     /**
@@ -174,6 +214,10 @@ class AudioPlaybackHelper {
             }
 
             val audioBytes = Base64.decode(cleanBase64, Base64.DEFAULT)
+            if (audioBytes.isEmpty()) {
+                onError?.invoke("No audio data received from server")
+                return
+            }
             val tempFile = File.createTempFile("mirkuz_speech_", ".mp3", context.cacheDir).apply {
                 deleteOnExit()
             }
@@ -243,6 +287,8 @@ class AudioPlaybackHelper {
     @Synchronized
     fun stop() {
         isPlayingQueue = false
+        queuePlayedAny = false
+        consecutiveChunkFailures = 0
         while (chunkQueue.isNotEmpty()) {
             try {
                 chunkQueue.poll()?.delete()

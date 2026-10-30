@@ -80,6 +80,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -90,6 +92,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -179,6 +182,8 @@ data class AyneUiState(
     val readTextEndpoint: String = DEFAULT_READ_TEXT_ENDPOINT,
     val askQuestionEndpoint: String = DEFAULT_ASK_QUESTION_ENDPOINT,
     val customVoice: String = "am-hamen",
+    val imageMaxDimension: Int = 800,
+    val imageJpegQuality: Int = 72,
     val lastResponse: VisionDescribeResponse? = null,
     val lastReadResponse: ReadTextResponse? = null,
     val lockedImageBase64: String? = null,
@@ -295,13 +300,11 @@ sealed interface AyneAction {
     data object RepeatLastAnswer : AyneAction
     data class SelectLanguage(val language: SupportedLanguage) : AyneAction
     data object FlipCamera : AyneAction
-    data class UpdateEndpoints(
-        val baseUrl: String? = null,
-        val visionUrl: String,
-        val readTextUrl: String,
-        val askQuestionUrl: String? = null
-    ) : AyneAction
     data class UpdateVoice(val voiceId: String) : AyneAction
+    data class UpdateImageCompression(
+        val maxDimension: Int,
+        val jpegQuality: Int
+    ) : AyneAction
     data object VolumeCaptureTriggered : AyneAction
     data object VolumeFollowUpTriggered : AyneAction
 }
@@ -420,6 +423,10 @@ class AyneViewModel(
         audioPlaybackHelper.onPlaybackStateChanged = { speaking ->
             _uiState.update { it.copy(isAssistantSpeaking = speaking) }
         }
+        // Keep the capture helper's live compression settings in sync with
+        // state defaults (user edits flow through UpdateImageCompression).
+        CameraCaptureHelper.compressionMaxDimension = _uiState.value.imageMaxDimension
+        CameraCaptureHelper.compressionJpegQuality = _uiState.value.imageJpegQuality
     }
 
     fun initFeedbackHelper(context: Context) {
@@ -935,25 +942,19 @@ class AyneViewModel(
                 }
                 _userMessage.tryEmit(feedback)
             }
-            is AyneAction.UpdateEndpoints -> {
-                val cleanedBase = action.baseUrl?.trim()?.trimEnd('/').orEmpty()
-                val cleanedVision = action.visionUrl.trim()
-                val cleanedRead = action.readTextUrl.trim()
-                val cleanedAsk = action.askQuestionUrl?.trim().orEmpty()
-                _uiState.update {
-                    val newBase = cleanedBase.ifBlank { it.baseUrl }
-                    it.copy(
-                        baseUrl = newBase,
-                        apiEndpoint = cleanedVision.ifBlank { it.apiEndpoint },
-                        readTextEndpoint = cleanedRead.ifBlank { it.readTextEndpoint },
-                        askQuestionEndpoint = cleanedAsk.ifBlank { it.askQuestionEndpoint }
-                    )
-                }
-                _userMessage.tryEmit("API Configuration updated")
-            }
             is AyneAction.UpdateVoice -> {
                 _uiState.update { it.copy(customVoice = action.voiceId) }
                 _userMessage.tryEmit("Voice set to ${action.voiceId}")
+            }
+            is AyneAction.UpdateImageCompression -> {
+                val maxDim = action.maxDimension.coerceIn(320, 1600)
+                val quality = action.jpegQuality.coerceIn(30, 95)
+                CameraCaptureHelper.compressionMaxDimension = maxDim
+                CameraCaptureHelper.compressionJpegQuality = quality
+                _uiState.update {
+                    it.copy(imageMaxDimension = maxDim, imageJpegQuality = quality)
+                }
+                _userMessage.tryEmit("Image quality: ${maxDim}px max, $quality% JPEG")
             }
             is AyneAction.VolumeCaptureTriggered -> {
                 _userMessage.tryEmit("Volume ▲: Capturing fresh surroundings...")
@@ -2212,16 +2213,17 @@ fun AyneAppScreen(
 
         if (showSettingsDialog) {
             VisionSettingsDialog(
-                currentBaseUrl = uiState.baseUrl,
-                currentEndpoint = uiState.apiEndpoint,
-                currentReadTextEndpoint = uiState.readTextEndpoint,
-                currentAskQuestionEndpoint = uiState.askQuestionEndpoint,
                 currentVoice = uiState.customVoice,
+                currentImageMaxDimension = uiState.imageMaxDimension,
+                currentImageJpegQuality = uiState.imageJpegQuality,
                 onDismiss = { showSettingsDialog = false },
-                onSave = { newBaseUrl, newVisionUrl, newReadUrl, newAskUrl, newVoice ->
+                onSave = { newVoice, newMaxDimension, newJpegQuality ->
                     showSettingsDialog = false
-                    viewModel.onAction(context, AyneAction.UpdateEndpoints(newBaseUrl, newVisionUrl, newReadUrl, newAskUrl))
                     viewModel.onAction(context, AyneAction.UpdateVoice(newVoice))
+                    viewModel.onAction(
+                        context,
+                        AyneAction.UpdateImageCompression(newMaxDimension, newJpegQuality)
+                    )
                 }
             )
         }
@@ -3383,19 +3385,15 @@ fun AyneBottomControls(
 
 @Composable
 fun VisionSettingsDialog(
-    currentBaseUrl: String,
-    currentEndpoint: String,
-    currentReadTextEndpoint: String,
-    currentAskQuestionEndpoint: String,
     currentVoice: String,
+    currentImageMaxDimension: Int,
+    currentImageJpegQuality: Int,
     onDismiss: () -> Unit,
-    onSave: (newBaseUrl: String, newVisionUrl: String, newReadTextUrl: String, newAskQuestionUrl: String, newVoice: String) -> Unit
+    onSave: (newVoice: String, newImageMaxDimension: Int, newImageJpegQuality: Int) -> Unit
 ) {
-    var baseUrlText by remember { mutableStateOf(currentBaseUrl) }
-    var visionUrlText by remember { mutableStateOf(currentEndpoint) }
-    var readTextUrlText by remember { mutableStateOf(currentReadTextEndpoint) }
-    var askQuestionUrlText by remember { mutableStateOf(currentAskQuestionEndpoint) }
     var selectedVoice by remember { mutableStateOf(currentVoice) }
+    var imageMaxDimension by remember { mutableFloatStateOf(currentImageMaxDimension.toFloat()) }
+    var imageJpegQuality by remember { mutableFloatStateOf(currentImageJpegQuality.toFloat()) }
 
     val voices = listOf(
         "am-hamen" to "am-hamen (Addis Native Amharic, Female)",
@@ -3441,124 +3439,61 @@ fun VisionSettingsDialog(
                     color = AynePureWhite
                 )
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
-                // Base URL
-                OutlinedTextField(
-                    value = baseUrlText,
-                    onValueChange = { baseUrlText = it },
-                    label = { Text(stringResource(R.string.base_url_label), color = AyneVibrantYellow) },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = AyneVibrantYellow,
-                        unfocusedBorderColor = AynePureWhite,
-                        focusedTextColor = AynePureWhite,
-                        unfocusedTextColor = AynePureWhite,
-                        cursorColor = AyneVibrantYellow
-                    ),
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Uri,
-                        imeAction = ImeAction.Next
+                // Image compression: max dimension (resolution)
+                Text(
+                    text = "Image resolution: ${imageMaxDimension.toInt()}px (longest side)",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = AyneVibrantYellow
+                )
+                Slider(
+                    value = imageMaxDimension,
+                    onValueChange = { imageMaxDimension = it },
+                    valueRange = 480f..1600f,
+                    steps = 6, // discrete stops: 480, 640, 800, 960, 1120, 1280, 1440, 1600
+                    colors = SliderDefaults.colors(
+                        thumbColor = AyneVibrantYellow,
+                        activeTrackColor = AyneVibrantYellow,
+                        inactiveTrackColor = AynePureWhite.copy(alpha = 0.3f)
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .testTag("base_url_input")
+                        .testTag("image_resolution_slider")
+                )
+                Text(
+                    text = "Lower = faster uploads (default 800px). Higher = more detail for small text.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = AynePureWhite.copy(alpha = 0.7f)
                 )
 
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
-                OutlinedButton(
-                    onClick = {
-                        val trimmed = baseUrlText.trim()
-                        if (trimmed.isNotBlank()) {
-                            visionUrlText = AyneUiState.buildVisionUrl(trimmed)
-                            readTextUrlText = AyneUiState.buildReadTextUrl(trimmed)
-                            askQuestionUrlText = AyneUiState.buildAskQuestionUrl(trimmed)
-                        }
-                    },
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier
-                        .align(Alignment.End)
-                        .testTag("apply_base_url_button")
-                ) {
-                    Text(
-                        text = stringResource(R.string.apply_base_url_button),
-                        color = AyneVibrantYellow,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // See and Describe URL
-                OutlinedTextField(
-                    value = visionUrlText,
-                    onValueChange = { visionUrlText = it },
-                    label = { Text(stringResource(R.string.vision_endpoint_label), color = AyneVibrantYellow) },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = AyneVibrantYellow,
-                        unfocusedBorderColor = AynePureWhite,
-                        focusedTextColor = AynePureWhite,
-                        unfocusedTextColor = AynePureWhite,
-                        cursorColor = AyneVibrantYellow
-                    ),
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Uri,
-                        imeAction = ImeAction.Next
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("api_endpoint_input")
+                // Image compression: JPEG quality
+                Text(
+                    text = "JPEG quality: ${imageJpegQuality.toInt()}%",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = AyneVibrantYellow
                 )
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Read Text & Signs URL
-                OutlinedTextField(
-                    value = readTextUrlText,
-                    onValueChange = { readTextUrlText = it },
-                    label = { Text(stringResource(R.string.read_text_endpoint_label), color = AyneVibrantYellow) },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = AyneVibrantYellow,
-                        unfocusedBorderColor = AynePureWhite,
-                        focusedTextColor = AynePureWhite,
-                        unfocusedTextColor = AynePureWhite,
-                        cursorColor = AyneVibrantYellow
-                    ),
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Uri,
-                        imeAction = ImeAction.Next
+                Slider(
+                    value = imageJpegQuality,
+                    onValueChange = { imageJpegQuality = it },
+                    valueRange = 40f..95f,
+                    colors = SliderDefaults.colors(
+                        thumbColor = AyneVibrantYellow,
+                        activeTrackColor = AyneVibrantYellow,
+                        inactiveTrackColor = AynePureWhite.copy(alpha = 0.3f)
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .testTag("read_text_endpoint_input")
+                        .testTag("image_quality_slider")
                 )
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Ask Question Real-time Stream URL
-                OutlinedTextField(
-                    value = askQuestionUrlText,
-                    onValueChange = { askQuestionUrlText = it },
-                    label = { Text(stringResource(R.string.ask_question_endpoint_label), color = AyneVibrantYellow) },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = AyneVibrantYellow,
-                        unfocusedBorderColor = AynePureWhite,
-                        focusedTextColor = AynePureWhite,
-                        unfocusedTextColor = AynePureWhite,
-                        cursorColor = AyneVibrantYellow
-                    ),
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Uri,
-                        imeAction = ImeAction.Done
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("ask_question_endpoint_input")
+                Text(
+                    text = "Lower = smaller/faster (default 72%). Higher = sharper photos.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = AynePureWhite.copy(alpha = 0.7f)
                 )
 
                 Spacer(modifier = Modifier.height(14.dp))
@@ -3598,10 +3533,8 @@ fun VisionSettingsDialog(
 
                 OutlinedButton(
                     onClick = {
-                        baseUrlText = AyneUiState.DEFAULT_BASE_URL
-                        visionUrlText = AyneUiState.DEFAULT_ENDPOINT
-                        readTextUrlText = AyneUiState.DEFAULT_READ_TEXT_ENDPOINT
-                        askQuestionUrlText = AyneUiState.DEFAULT_ASK_QUESTION_ENDPOINT
+                        imageMaxDimension = 800f
+                        imageJpegQuality = 72f
                         selectedVoice = "am-hamen"
                     },
                     shape = RoundedCornerShape(8.dp),
@@ -3618,7 +3551,7 @@ fun VisionSettingsDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onSave(baseUrlText, visionUrlText, readTextUrlText, askQuestionUrlText, selectedVoice) },
+                onClick = { onSave(selectedVoice, imageMaxDimension.toInt(), imageJpegQuality.toInt()) },
                 colors = ButtonDefaults.buttonColors(
                     containerColor = AyneVibrantYellow,
                     contentColor = AyneOnYellow

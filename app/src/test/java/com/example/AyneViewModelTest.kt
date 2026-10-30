@@ -37,24 +37,28 @@ class AyneViewModelTest {
     }
 
     @Test
-    fun testUpdateEndpointsActionWithBaseUrl() {
+    fun testUpdateImageCompressionActionClampsAndApplies() {
         val viewModel = AyneViewModel()
         val context = org.robolectric.RuntimeEnvironment.getApplication()
-        val customBase = "https://custom-server.app"
+
         viewModel.onAction(
             context,
-            AyneAction.UpdateEndpoints(
-                baseUrl = customBase,
-                visionUrl = "$customBase/api/see-and-describe",
-                readTextUrl = "$customBase/api/read-text",
-                askQuestionUrl = "$customBase/api/ask-question"
-            )
+            AyneAction.UpdateImageCompression(maxDimension = 1280, jpegQuality = 85)
         )
-        val state = viewModel.uiState.value
-        assertEquals("https://custom-server.app", state.baseUrl)
-        assertEquals("https://custom-server.app/api/see-and-describe", state.apiEndpoint)
-        assertEquals("https://custom-server.app/api/read-text", state.readTextEndpoint)
-        assertEquals("https://custom-server.app/api/ask-question", state.askQuestionEndpoint)
+        var state = viewModel.uiState.value
+        assertEquals(1280, state.imageMaxDimension)
+        assertEquals(85, state.imageJpegQuality)
+        assertEquals(1280, com.example.util.CameraCaptureHelper.compressionMaxDimension)
+        assertEquals(85, com.example.util.CameraCaptureHelper.compressionJpegQuality)
+
+        // Out-of-range values clamp to sane bounds instead of breaking capture.
+        viewModel.onAction(
+            context,
+            AyneAction.UpdateImageCompression(maxDimension = 9999, jpegQuality = 1)
+        )
+        state = viewModel.uiState.value
+        assertEquals(1600, state.imageMaxDimension)
+        assertEquals(30, state.imageJpegQuality)
     }
 
     @Test

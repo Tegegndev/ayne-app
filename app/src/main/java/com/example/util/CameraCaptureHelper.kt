@@ -20,6 +20,22 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 
 object CameraCaptureHelper {
 
+    /**
+     * Live image-compression settings (edited in Settings; defaults are the
+     * original 800px / 72% JPEG). @Volatile so camera threads see updates.
+     */
+    @Volatile
+    var compressionMaxDimension: Int = 800
+        set(value) {
+            field = value.coerceIn(320, 1600)
+        }
+
+    @Volatile
+    var compressionJpegQuality: Int = 72
+        set(value) {
+            field = value.coerceIn(30, 95)
+        }
+
     suspend fun captureFrame(
         context: Context,
         imageCapture: ImageCapture?
@@ -80,12 +96,20 @@ object CameraCaptureHelper {
 
     /**
      * Pre-Upload Image Compression (Critical for Mobile Networks):
-     * Downscales the camera bitmap to a max dimension of 800px and compresses to JPEG quality 72%.
-     * Yields ~40KB - 60KB payload for near-instant upload (<150ms) over mobile networks.
+     * Downscales the camera bitmap to a max dimension (default 800px) and
+     * compresses to JPEG (default 72% quality). Yields ~40KB - 60KB payload
+     * for near-instant upload (<150ms) over mobile networks. The user can
+     * adjust both in Settings for sharper-looking requests — the helper's
+     * live settings are applied unless explicit values are passed.
      */
-    fun compressAndEncodeBitmap(bitmap: Bitmap): String {
-        val maxDimension = 800
-        val scale = minOf(maxDimension.toFloat() / bitmap.width, maxDimension.toFloat() / bitmap.height, 1.0f)
+    fun compressAndEncodeBitmap(
+        bitmap: Bitmap,
+        maxDimension: Int = compressionMaxDimension,
+        jpegQuality: Int = compressionJpegQuality
+    ): String {
+        val dimension = maxDimension.coerceIn(320, 1600)
+        val quality = jpegQuality.coerceIn(30, 95)
+        val scale = minOf(dimension.toFloat() / bitmap.width, dimension.toFloat() / bitmap.height, 1.0f)
         val scaledBitmap = Bitmap.createScaledBitmap(
             bitmap,
             (bitmap.width * scale).toInt().coerceAtLeast(1),
@@ -93,15 +117,19 @@ object CameraCaptureHelper {
             true
         )
         val outputStream = ByteArrayOutputStream()
-        scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 72, outputStream)
+        scaledBitmap.compress(Bitmap.CompressFormat.JPEG, quality, outputStream)
         val bytes = outputStream.toByteArray()
         return Base64.encodeToString(bytes, Base64.NO_WRAP)
     }
 
     fun compressImageToBase64(bitmap: Bitmap): String = compressAndEncodeBitmap(bitmap)
 
-    fun resizeAndEncodeBase64(sourceBitmap: Bitmap, maxDimension: Int = 800, quality: Int = 72): String {
-        return compressAndEncodeBitmap(sourceBitmap)
+    fun resizeAndEncodeBase64(
+        sourceBitmap: Bitmap,
+        maxDimension: Int = compressionMaxDimension,
+        quality: Int = compressionJpegQuality
+    ): String {
+        return compressAndEncodeBitmap(sourceBitmap, maxDimension, quality)
     }
 
     /**
