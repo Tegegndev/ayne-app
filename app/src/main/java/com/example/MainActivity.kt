@@ -471,6 +471,23 @@ class AyneViewModel(
     }
 
     /**
+     * Follow-up entry: opens the Ask voice screen WITHOUT a fresh greeting and
+     * goes straight into listening, so a Volume− press on the home screen
+     * starts the next question of the current session immediately. Keeps the
+     * locked image, previous ask turns, and the old greeting intact.
+     */
+    fun openAskFollowUp(context: Context) {
+        bargeIn()
+        _uiState.update {
+            it.copy(
+                isCompanionMode = true,
+                isAskQuestionOpen = true
+            )
+        }
+        startVoiceRecording(context)
+    }
+
+    /**
      * Stores a freshly captured frame without restarting the Ask Question
      * conversation (greeting and history stay intact). Any previous
      * image/session binding is cleared so the new photo is uploaded with the
@@ -686,7 +703,13 @@ class AyneViewModel(
     private fun startRealtimeTurn(context: Context, voiceBase64: String) {
         val language = _uiState.value.selectedLanguage.code
         val voice = if (language == "om") "om-abdi" else "am-hamen"
-        val recentHistory = _uiState.value.askQuestionHistory.takeLast(6)
+        // Follow-up context: prefer the ask-turn history; on the very first
+        // realtime follow-up after a fresh describe, fall back to the rolling
+        // vision conversation so the scene description still informs the model.
+        val historyTurns = _uiState.value.askQuestionHistory.ifEmpty {
+            _uiState.value.conversationHistory
+        }
+        val recentHistory = historyTurns.takeLast(6)
         val systemPrompt = if (recentHistory.isEmpty()) {
             null
         } else {
@@ -2026,11 +2049,22 @@ fun AyneAppScreen(
                 viewModel.startVoiceRecording(context)
             }
         } else {
-            // On main screen: just open Ask Question page and play the greeting.
-            // No image is taken until the user presses Volume+.
+            // On main screen: Volume− is a FOLLOW-UP question when a scene or
+            // previous ask turn exists — open the voice screen already
+            // listening, with no fresh greeting. Only with nothing in memory
+            // does it start a brand-new ask session (with the greeting).
             viewModel.bargeIn()
             viewModel.playTapEarcon()
-            viewModel.openAskQuestion(context)
+            val hasContext = uiState.lockedImageBase64 != null ||
+                uiState.activeSessionId != null ||
+                uiState.askQuestionHistory.isNotEmpty()
+            if (hasContext) {
+                requireMicPermission {
+                    viewModel.openAskFollowUp(context)
+                }
+            } else {
+                viewModel.openAskQuestion(context)
+            }
         }
     }
 
