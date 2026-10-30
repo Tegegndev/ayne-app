@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Launch window background. Without this the app flashes the platform default
+  (often white) before Compose draws its first frame. For a blind user a bright
+  flash is jarring, and for a sighted bystander it looks broken.
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/black" />
+    <item
+        android:width="120dp"
+        android:height="120dp"
+        android:gravity="center"
+        android:drawable="@drawable/ic_splash_logo" />
+</layer-list>
