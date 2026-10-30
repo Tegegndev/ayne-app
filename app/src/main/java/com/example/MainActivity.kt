@@ -2112,6 +2112,11 @@ fun AyneAppScreen(
     var pendingPermissionDialog by remember { mutableStateOf<String?>(null) }
     var pendingPermissionMessage by remember { mutableStateOf("") }
     var showFirstLaunchPicker by rememberSaveable { mutableStateOf(false) }
+    // True once the first-launch picker has been resolved (pick or defer). The
+    // home content stays hidden until then so the homepage never flashes
+    // behind the startup dialogs on a brand-new install.
+    var firstLaunchResolved by rememberSaveable { mutableStateOf(false) }
+    val firstLaunchPending = uiState.isFirstLaunch && !firstLaunchResolved
 
     // Launch-time permission flow: scheduled continuation of the request that is
     // currently waiting for its system dialog result (null when no launch flow is active).
@@ -2413,7 +2418,13 @@ fun AyneAppScreen(
             }
         }
     ) { innerPadding ->
-        if (uiState.isCompanionMode) {
+        if (firstLaunchPending) {
+            // First launch still in progress (language not picked yet): keep the
+            // screen black so the homepage cannot flash behind the dialogs.
+            Box(modifier = Modifier
+                .fillMaxSize()
+                .background(AynePureBlack))
+        } else if (uiState.isCompanionMode) {
             // Full-screen voice-only Ask AI: ripple orb takes over the whole screen.
             VoiceAskScreen(
                 uiState = uiState,
@@ -2573,6 +2584,7 @@ fun AyneAppScreen(
             FirstLaunchLanguagePickerDialog(
                 onLanguageChosen = { language ->
                     showFirstLaunchPicker = false
+                    firstLaunchResolved = true
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     viewModel.onAction(context, AyneAction.SelectLanguage(language))
                     // Confirm in the chosen language (device TTS, best effort).
@@ -2580,6 +2592,7 @@ fun AyneAppScreen(
                 },
                 onDismiss = {
                     showFirstLaunchPicker = false
+                    firstLaunchResolved = true
                 }
             )
         }
