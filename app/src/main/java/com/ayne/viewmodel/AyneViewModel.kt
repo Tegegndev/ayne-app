@@ -144,6 +144,15 @@ class AyneViewModel(
     private var recordingJob: Job? = null
 
     /**
+     * Hands-free Ask conversation: a pending "listen again" scheduled after an
+     * answer finishes playing. Cancelled when the Ask page closes.
+     */
+    private var conversationLoopJob: Job? = null
+
+    /** Consecutive no-speech cycles inside the Ask conversation. */
+    private var silentCycles = 0
+
+    /**
      * The streaming network job responsible for the current spoken answer
      * (describe / follow-up / read-text). Cancelled on barge-in so an
      * interrupted answer STOPS streaming instead of re-enqueueing later audio
@@ -269,6 +278,12 @@ class AyneViewModel(
         const val LANGUAGE_PREFS_KEY_LANGUAGE = "language"
         const val LANGUAGE_PREFS_KEY_VOICE = "voice"
         const val LANGUAGE_PREFS_KEY_CHOSEN = "language_chosen"
+
+        /** Pause before re-entering listening after a spoken answer. */
+        const val RELISTEN_DELAY_MS = 800L
+
+        /** Silent cycles before the Ask conversation pauses itself. */
+        const val MAX_SILENT_CYCLES = 2
     }
 
     private fun mapFailureToUserMessage(context: Context, error: Throwable?): String {
@@ -317,10 +332,11 @@ class AyneViewModel(
 
     fun openAskQuestion(context: Context, capturedFrame: String? = null) {
         bargeIn()
+        silentCycles = 0
         val greeting = when (_uiState.value.selectedLanguage) {
-            SupportedLanguage.ENGLISH -> "Hello! How can I help you? Press Volume up to take a photo, or Volume down to ask your question."
-            SupportedLanguage.AFAN_OROMOO -> "Akkam! Maal si gargaaru? Suuraa kaasuuf Volume ol dhiibi, gaaffii gaafachuuf Volume gadi dhiibi."
-            SupportedLanguage.AMHARIC -> "ሰላም! ምን ልርዳዎት? ፎቶ ለማንሳት የድምፅ መጨመሪያውን፣ ጥያቄ ለመጠየቅ የድምፅ መቀነሻውን ይጫኑ።"
+            SupportedLanguage.ENGLISH -> "Hello! I'm listening — ask me anything."
+            SupportedLanguage.AFAN_OROMOO -> "Akkam! Nan dhaggeeffadha — waan fedhe natti himi."
+            SupportedLanguage.AMHARIC -> "ሰላም! እያዳመጥኩ ነው — ምንም ይጠይቁኝ።"
         }
         _uiState.update {
             it.copy(
@@ -350,6 +366,7 @@ class AyneViewModel(
      */
     fun openAskFollowUp(context: Context) {
         bargeIn()
+        silentCycles = 0
         _uiState.update {
             it.copy(
                 isCompanionMode = true,
@@ -384,9 +401,36 @@ class AyneViewModel(
 
     fun exitCompanionMode() {
         bargeIn()
+        conversationLoopJob?.cancel()
+        conversationLoopJob = null
+        silentCycles = 0
         _uiState.update { it.copy(isCompanionMode = false, isAskQuestionOpen = false, isBusy = false) }
         playTapEarcon()
-        _userMessage.tryEmit("Switched to Vision mode")
+        val exitMsg = when (_uiState.value.selectedLanguage) {
+            SupportedLanguage.ENGLISH -> "Conversation ended"
+            SupportedLanguage.AFAN_OROMOO -> "Hir'a haasawumsaa xumure"
+            SupportedLanguage.AMHARIC -> "ውይይቱ ተጠናቋል"
+        }
+        _userMessage.tryEmit(exitMsg)
+    }
+
+    /**
+     * Hands-free Ask conversation: after an answer finishes playing (or the
+     * greeting), re-enter listening so the user can keep talking without any
+     * tap or key press. No-ops unless the Ask page is open, and the guard
+     * re-checks state after the delay so closing the page always stops the
+     * loop.
+     */
+    private fun scheduleHandsFreeRelisten(context: Context, delayMs: Long = RELISTEN_DELAY_MS) {
+        if (!_uiState.value.isAskQuestionOpen) return
+        conversationLoopJob?.cancel()
+        conversationLoopJob = viewModelScope.launch {
+            delay(delayMs)
+            val s = _uiState.value
+            if (s.isAskQuestionOpen && !s.isRecordingVoice && !s.isBusy && !s.isAssistantSpeaking) {
+                startVoiceRecording(context)
+            }
+        }
     }
 
     fun clearAskQuestionSession(context: Context) {
@@ -466,15 +510,30 @@ class AyneViewModel(
                 if (!_uiState.value.isRecordingVoice) return@launch // cancelled externally
 
                 if (hasSpoken) {
+                    silentCycles = 0
                     stopAndSubmitVoiceRecording(context)
                 } else if (_uiState.value.isAskQuestionOpen) {
+                    // Hands-free conversation: nudge and re-listen instead of
+                    // dead-ending; pause the loop after repeated silence.
                     cancelVoiceRecording()
-                    val prompt = when (_uiState.value.selectedLanguage) {
-                        SupportedLanguage.ENGLISH -> "I didn't hear your question, please tap the mic to speak."
-                        SupportedLanguage.AFAN_OROMOO -> "Gaaffii kee hin dhageenye, maaloo irra deebi'ii dubbadhu."
-                        SupportedLanguage.AMHARIC -> "ጥያቄዎን አልሰማሁም፤ እባክዎ ማይክሮፎኑን ተጭነው እንደገና ይናገሩ።"
+                    silentCycles++
+                    if (silentCycles < MAX_SILENT_CYCLES) {
+                        val prompt = when (_uiState.value.selectedLanguage) {
+                            SupportedLanguage.ENGLISH -> "I'm listening…"
+                            SupportedLanguage.AFAN_OROMOO -> "Nan dhaggeeffadha…"
+                            SupportedLanguage.AMHARIC -> "እያዳመጥኩ ነው…"
+                        }
+                        _userMessage.tryEmit(prompt)
+                        scheduleHandsFreeRelisten(context, delayMs = 600)
+                    } else {
+                        silentCycles = 0
+                        val pause = when (_uiState.value.selectedLanguage) {
+                            SupportedLanguage.ENGLISH -> "Pausing the conversation — tap the circle when you're ready."
+                            SupportedLanguage.AFAN_OROMOO -> "Hir'a baafe — yeroo qopheessu goobee tuqi."
+                            SupportedLanguage.AMHARIC -> "ውይይቱ ለጊዜ ቆሟል — ሲዘጋጁ ክቡኑን ይንኩ።"
+                        }
+                        _userMessage.tryEmit(pause)
                     }
-                    _userMessage.tryEmit(prompt)
                 } else {
                     // Silence fallback: no speech detected in vision mode → stop mic, describe current view
                     cancelVoiceRecording()
@@ -658,7 +717,11 @@ class AyneViewModel(
                     if (!mp3Base64.isNullOrBlank()) {
                         // Playback flips the orb to Speaking via the playback listener;
                         // also records lastAudioFile so "Repeat last answer" works.
-                        audioPlaybackHelper.playBase64Audio(context, mp3Base64)
+                        audioPlaybackHelper.playBase64Audio(
+                            context,
+                            mp3Base64,
+                            onComplete = { scheduleHandsFreeRelisten(context) }
+                        )
                     } else if (_uiState.value.isAskQuestionOpen) {
                         executeFollowUpRequest(
                             context,
@@ -1356,6 +1419,7 @@ class AyneViewModel(
                         audioPlaybackHelper.playBase64Audio(
                             context = context,
                             rawBase64Audio = rawAudio,
+                            onComplete = { scheduleHandsFreeRelisten(context) },
                             onError = { err ->
                                 handleAudioPlaybackError(context, err)
                             }
@@ -1660,6 +1724,7 @@ class AyneViewModel(
                 audioPlaybackHelper.playBase64Audio(
                     context = context,
                     rawBase64Audio = audioBase64,
+                    onComplete = { scheduleHandsFreeRelisten(context) },
                     onError = { err ->
                         handleAudioPlaybackError(context, err)
                     }
