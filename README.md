@@ -61,6 +61,10 @@ Accessibility is the product, not a checkbox:
 
 ## Roadmap
 
+- **Real-time voice chat** — a live, continuous conversation with the assistant instead of one question at a time.
+- **Automatic flashlight** — when the camera detects dim light or darkness, the flashlight turns on by itself so descriptions stay accurate at night.
+- **Daily news** — hear the day's news read aloud in Amharic or Afaan Oromo.
+- **Sports news** — scores and updates on demand, spoken in your language.
 - **Location awareness** — "where am I?" answered with nearby landmarks.
 - **Offline speech** — voice input that works without connectivity.
 - **More Ethiopian languages** — Sidama, Tigrinya and Wolaytta.
