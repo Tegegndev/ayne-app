@@ -105,11 +105,6 @@
     <string name="clear_scene_button">New Scene</string>
     <string name="clear_scene_desc">Clear active scene and reset conversation history</string>
     <string name="analyzing_followup">Analyzing follow-up question on active scene…</string>
-    <string name="debug_preview_title">Captured Frame (Debug)</string>
-    <string name="debug_preview_desc">Captured camera frame debug preview. Tap to inspect full resolution image.</string>
-    <string name="debug_preview_tap_to_enlarge">Tap to inspect</string>
-    <string name="debug_dialog_title">Captured Frame Preview</string>
-    <string name="debug_dialog_close">Close</string>
     <string name="dismiss_result_desc">Dismiss result</string>
     <string name="view_verbatim_text">View Verbatim OCR Text · ሙሉ ጽሑፉን አሳይ</string>
     <string name="hide_verbatim_text">Hide Verbatim Text · ዝርዝር ጽሑፉን ደብቅ</string>
