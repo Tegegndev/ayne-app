@@ -234,7 +234,7 @@ class AyneViewModel(
                 it.copy(
                     isFirstLaunch = true,
                     selectedLanguage = SupportedLanguage.AMHARIC,
-                    customVoice = "am-hamen"
+                    customVoice = VoiceCatalog.defaultVoiceFor(SupportedLanguage.AMHARIC)
                 )
             }
             return
@@ -247,14 +247,10 @@ class AyneViewModel(
     /** Keeps the customVoice consistent with its language rules (am-* / om-*, English free). */
     private fun restoreVoice(language: SupportedLanguage, prefs: android.content.SharedPreferences): String {
         val savedVoice = prefs.getString(LANGUAGE_PREFS_KEY_VOICE, null)
-        return when (language) {
-            SupportedLanguage.AFAN_OROMOO -> {
-                if (savedVoice == null || !savedVoice.startsWith("om-")) "om-ayyaantuu" else savedVoice
-            }
-            SupportedLanguage.AMHARIC -> {
-                if (savedVoice == null || !savedVoice.startsWith("am-")) "am-hamen" else savedVoice
-            }
-            SupportedLanguage.ENGLISH -> savedVoice ?: _uiState.value.customVoice
+        return if (savedVoice != null && VoiceCatalog.belongsTo(savedVoice, language)) {
+            savedVoice
+        } else {
+            VoiceCatalog.defaultVoiceFor(language)
         }
     }
 
@@ -791,7 +787,13 @@ class AyneViewModel(
                     SupportedLanguage.AMHARIC -> {
                         if (_uiState.value.customVoice.startsWith("om-")) "am-hamen" else _uiState.value.customVoice
                     }
-                    SupportedLanguage.ENGLISH -> _uiState.value.customVoice
+                    SupportedLanguage.ENGLISH -> {
+                        if (!VoiceCatalog.belongsTo(_uiState.value.customVoice, SupportedLanguage.ENGLISH)) {
+                            VoiceCatalog.defaultVoiceFor(SupportedLanguage.ENGLISH)
+                        } else {
+                            _uiState.value.customVoice
+                        }
+                    }
                 }
                 _uiState.update { it.copy(selectedLanguage = action.language, customVoice = newVoice) }
                 saveLanguagePreference(context)

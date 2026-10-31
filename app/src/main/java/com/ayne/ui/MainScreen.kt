@@ -612,6 +612,7 @@ fun AyneAppScreen(
         if (showSettingsDialog) {
             VisionSettingsDialog(
                 currentVoice = uiState.customVoice,
+                selectedLanguage = uiState.selectedLanguage,
                 currentImageMaxDimension = uiState.imageMaxDimension,
                 currentImageJpegQuality = uiState.imageJpegQuality,
                 onDismiss = { showSettingsDialog = false },

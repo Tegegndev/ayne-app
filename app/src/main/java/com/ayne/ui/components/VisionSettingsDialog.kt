@@ -37,33 +37,28 @@ import com.ayne.ui.theme.AyneOnYellow
 import com.ayne.ui.theme.AynePureBlack
 import com.ayne.ui.theme.AynePureWhite
 import com.ayne.ui.theme.AyneVibrantYellow
+import com.ayne.viewmodel.SupportedLanguage
+import com.ayne.viewmodel.VoiceCatalog
 
 @Composable
 fun VisionSettingsDialog(
     currentVoice: String,
+    selectedLanguage: SupportedLanguage,
     currentImageMaxDimension: Int,
     currentImageJpegQuality: Int,
     onDismiss: () -> Unit,
     onSave: (newVoice: String, newImageMaxDimension: Int, newImageJpegQuality: Int) -> Unit
 ) {
-    var selectedVoice by remember { mutableStateOf(currentVoice) }
+    // Only the voices that can speak the user's selected language.
+    val voices = VoiceCatalog.voicesFor(selectedLanguage)
+    var selectedVoice by remember(currentVoice, selectedLanguage) {
+        mutableStateOf(
+            if (voices.any { it.id == currentVoice }) currentVoice
+            else VoiceCatalog.defaultVoiceFor(selectedLanguage)
+        )
+    }
     var imageMaxDimension by remember { mutableFloatStateOf(currentImageMaxDimension.toFloat()) }
     var imageJpegQuality by remember { mutableFloatStateOf(currentImageJpegQuality.toFloat()) }
-
-    val voices = listOf(
-        "am-hamen" to "am-hamen (Addis Native Amharic, Female)",
-        "am-simon" to "am-simon (Addis Native Amharic, Male)",
-        "am-yohanes-calm" to "am-yohanes-calm (Addis Calm Narrative)",
-        "am-tesfa" to "am-tesfa (Addis Energetic Daily)",
-        "om-ayyaantuu" to "om-ayyaantuu (Addis Native Oromo, Female)",
-        "om-bikila" to "om-bikila (Addis Native Oromo, Male)",
-        "om-leensaa" to "om-leensaa (Addis Native Oromo, Narrative)",
-        "om-diriba" to "om-diriba (Addis Native Oromo, Clear)",
-        "Zephyr" to "Zephyr (Gemini Neural, Fast Clear)",
-        "Aoede" to "Aoede (Gemini Neural, Warm Reading)",
-        "Puck" to "Puck (Gemini Neural, Upbeat)",
-        "Fenrir" to "Fenrir (Gemini Neural, Calm)"
-    )
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -162,13 +157,13 @@ fun VisionSettingsDialog(
 
                 Spacer(modifier = Modifier.height(6.dp))
 
-                voices.forEach { (voiceId, label) ->
-                    val isChosen = voiceId == selectedVoice
+                voices.forEach { voice ->
+                    val isChosen = voice.id == selectedVoice
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { selectedVoice = voiceId }
+                            .clickable { selectedVoice = voice.id }
                             .padding(vertical = 5.dp)
                     ) {
                         Text(
@@ -178,7 +173,7 @@ fun VisionSettingsDialog(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = label,
+                            text = voice.label,
                             color = if (isChosen) AyneVibrantYellow else AynePureWhite,
                             fontSize = 13.sp,
                             fontWeight = if (isChosen) FontWeight.Bold else FontWeight.Normal
@@ -190,7 +185,7 @@ fun VisionSettingsDialog(
                     onClick = {
                         imageMaxDimension = 800f
                         imageJpegQuality = 72f
-                        selectedVoice = "am-hamen"
+                        selectedVoice = VoiceCatalog.defaultVoiceFor(selectedLanguage)
                     },
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier
