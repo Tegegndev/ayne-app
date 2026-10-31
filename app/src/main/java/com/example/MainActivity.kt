@@ -9,6 +9,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import com.example.ui.AyneAppScreen
 import com.example.ui.theme.AyneTheme
+import com.example.util.TempAudioStore
 import com.example.util.VolumeKeyHandler
 import com.example.viewmodel.AyneViewModel
 
@@ -23,6 +24,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        TempAudioStore.init(this)
         viewModel.initLanguagePreference(this)
         setContent {
             AyneTheme {
@@ -37,6 +39,7 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         volumeKeyHandler.onDestroy()
+        TempAudioStore.prune(this)
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {

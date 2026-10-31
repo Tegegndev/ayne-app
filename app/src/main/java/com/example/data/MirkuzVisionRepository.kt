@@ -4,6 +4,7 @@ import android.media.MediaPlayer
 import com.example.data.endpoints.EndpointPath
 import com.example.data.endpoints.LanguageRouter
 import com.example.data.endpoints.Variant
+import com.example.util.TempAudioStore
 import android.util.Base64
 import okhttp3.Call
 import okhttp3.Callback
@@ -73,7 +74,7 @@ class MirkuzVisionRepository(
             .post(json.toString().toRequestBody("application/json".toMediaType()))
             .build()
 
-        val tempAudioFile = File.createTempFile("mirkuz_read_stream", ".mp3")
+        val tempAudioFile = TempAudioStore.createTempAudioFile(prefix = "mirkuz_read_stream", suffix = ".mp3")
         val audioStream = FileOutputStream(tempAudioFile)
         var playbackStarted = false
 
@@ -250,7 +251,7 @@ class MirkuzVisionRepository(
     private fun playBase64(b64: String, onError: ((String) -> Unit)? = null): Result<Unit> {
         return try {
             val audioBytes = Base64.decode(b64, Base64.DEFAULT)
-            val tempFile = File.createTempFile("mirkuz_speech", ".mp3")
+            val tempFile = TempAudioStore.createTempAudioFile(prefix = "mirkuz_speech", suffix = ".mp3")
             FileOutputStream(tempFile).use { it.write(audioBytes) }
             playFile(tempFile, onError)
         } catch (e: Exception) {

@@ -11,6 +11,7 @@ import com.example.data.cleanLabelPrefix
 import com.example.data.endpoints.EndpointPath
 import com.example.data.endpoints.LanguageRouter
 import com.example.data.endpoints.Variant
+import com.example.util.TempAudioStore
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
@@ -140,7 +141,7 @@ class MirkuzVisionManager(
             .post(payload.toString().toRequestBody("application/json".toMediaType()))
             .build()
 
-        val tempAudioFile = File.createTempFile("mirkuz_read_stream", ".mp3", context.cacheDir)
+        val tempAudioFile = TempAudioStore.createTempAudioFile(context, "mirkuz_read_stream", ".mp3")
         val audioOutputStream = FileOutputStream(tempAudioFile)
         var hasStartedAudioPlayback = false
 
@@ -459,7 +460,7 @@ class MirkuzVisionManager(
     fun playBase64Audio(base64Audio: String, onError: ((String) -> Unit)? = null): Result<Unit> {
         return try {
             val audioBytes = Base64.decode(base64Audio, Base64.DEFAULT)
-            val tempFile = File.createTempFile("mirkuz_speech", ".mp3", context.cacheDir)
+            val tempFile = TempAudioStore.createTempAudioFile(context, "mirkuz_speech", ".mp3")
             FileOutputStream(tempFile).use { it.write(audioBytes) }
             playAudioFile(tempFile, onError)
         } catch (e: Exception) {

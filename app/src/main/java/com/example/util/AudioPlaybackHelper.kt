@@ -72,7 +72,7 @@ class AudioPlaybackHelper {
                 return
             }
             val ext = if (format.equals("wav", ignoreCase = true)) ".wav" else ".mp3"
-            val tempChunkFile = File.createTempFile("mirkuz_chunk_", ext, context.cacheDir).apply {
+            val tempChunkFile = TempAudioStore.createTempAudioFile(context, "mirkuz_chunk_", ext).apply {
                 deleteOnExit()
             }
             FileOutputStream(tempChunkFile).use { fos ->
@@ -187,7 +187,7 @@ class AudioPlaybackHelper {
             if (cleanBase64.isBlank()) return
 
             val audioBytes = Base64.decode(cleanBase64, Base64.DEFAULT)
-            val fullFile = File.createTempFile("mirkuz_speech_full_", ".mp3", context.cacheDir).apply {
+            val fullFile = TempAudioStore.createTempAudioFile(context, "mirkuz_speech_full_", ".mp3").apply {
                 deleteOnExit()
             }
             FileOutputStream(fullFile).use { fos ->
@@ -220,7 +220,7 @@ class AudioPlaybackHelper {
                 onError?.invoke("No audio data received from server")
                 return
             }
-            val tempFile = File.createTempFile("mirkuz_speech_", ".mp3", context.cacheDir).apply {
+            val tempFile = TempAudioStore.createTempAudioFile(context, "mirkuz_speech_", ".mp3").apply {
                 deleteOnExit()
             }
 
