@@ -15,7 +15,7 @@ import java.io.ByteArrayOutputStream
 import java.io.IOException
 
 class VisualSessionManager(
-    private val httpClient: OkHttpClient = OkHttpClient(),
+    private val httpClient: OkHttpClient = HttpClientProvider.okHttpClient,
     private val onAudioReceived: (audioBytes: ByteArray, spokenText: String) -> Unit = { _, _ -> },
     private val onError: (String) -> Unit = {}
 ) {

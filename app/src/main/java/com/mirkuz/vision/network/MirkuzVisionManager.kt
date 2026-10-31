@@ -8,6 +8,7 @@ import android.os.Vibrator
 import android.os.VibratorManager
 import android.util.Base64
 import com.example.data.cleanLabelPrefix
+import com.example.data.HttpClientProvider
 import com.example.data.endpoints.EndpointPath
 import com.example.data.endpoints.LanguageRouter
 import com.example.data.endpoints.Variant
@@ -38,7 +39,7 @@ import java.io.IOException
 class MirkuzVisionManager(
     private val context: Context,
     private val serverBaseUrl: String,
-    private val okHttpClient: OkHttpClient = OkHttpClient()
+    private val okHttpClient: OkHttpClient = HttpClientProvider.okHttpClient
 ) {
     private var activeSessionId: String? = null
     private var mediaPlayer: MediaPlayer? = null

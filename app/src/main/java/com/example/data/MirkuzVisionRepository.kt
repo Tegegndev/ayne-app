@@ -23,7 +23,7 @@ import java.io.IOException
 
 class MirkuzVisionRepository(
     private val serverBaseUrl: String,
-    private val okHttpClient: OkHttpClient = OkHttpClient()
+    private val okHttpClient: OkHttpClient = HttpClientProvider.okHttpClient
 ) {
     private var activeSessionId: String? = null
     private var currentPlayer: MediaPlayer? = null
