@@ -141,7 +141,9 @@ class AudioPlaybackHelper {
         } catch (e: Exception) {
             try {
                 nextFile.delete()
-            } catch (ignored: Exception) {}
+            } catch (ignored: Exception) {
+                // Deliberate: ignore error when deleting unplayable temporary audio chunk file
+            }
             releasePlayer()
             // Streamed TTS arrives as arbitrary byte slices: a chunk can be a
             // header fragment or a split MP3 frame that MediaPlayer cannot
@@ -194,7 +196,7 @@ class AudioPlaybackHelper {
             }
             lastAudioFile = fullFile
         } catch (e: Exception) {
-            // Ignore
+            android.util.Log.e("AudioPlaybackHelper", "Failed to cache consolidated audio: ${e.message}", e)
         }
     }
 
@@ -292,7 +294,9 @@ class AudioPlaybackHelper {
         while (chunkQueue.isNotEmpty()) {
             try {
                 chunkQueue.poll()?.delete()
-            } catch (e: Exception) {}
+            } catch (e: Exception) {
+                // Deliberate: ignore error deleting discarded temporary audio chunk
+            }
         }
         try {
             mediaPlayer?.let {
@@ -313,7 +317,7 @@ class AudioPlaybackHelper {
         try {
             mediaPlayer?.release()
         } catch (e: Exception) {
-            // Ignore
+            android.util.Log.e("AudioPlaybackHelper", "Failed to cache consolidated audio: ${e.message}", e)
         } finally {
             mediaPlayer = null
         }

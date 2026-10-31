@@ -23,6 +23,9 @@
     <string name="volume_hint_followup">follow-up</string>
     
     <!-- Feedback & Status Messages -->
+    <string name="error_audio_playback">Could not play audio response</string>
+    <string name="error_network">Network connection failed. Please check your connection and try again.</string>
+    <string name="error_bad_response">Server returned an invalid response. Please try again.</string>
     <string name="snackbar_coming_soon">Coming soon — backend not connected</string>
     <string name="snackbar_no_answer">No answer yet</string>
     <string name="camera_permission_granted">Camera permission granted. Ready to scan.</string>

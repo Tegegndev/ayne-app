@@ -42,7 +42,9 @@ class MirkuzVisionRepository(
                 it.release()
             }
             currentPlayer = null
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            // Deliberate: ignore error when releasing an already stopped MediaPlayer instance
+        }
     }
 
     // ==========================================
@@ -104,7 +106,7 @@ class MirkuzVisionRepository(
                                 if (!playbackStarted) {
                                     playbackStarted = true
                                     onFirstAudioPlay()
-                                    playFile(tempAudioFile)
+                                    playFile(tempAudioFile, onError)
                                 }
                             }
                         } catch (e: Exception) {
@@ -114,15 +116,19 @@ class MirkuzVisionRepository(
                     "done" -> {
                         try {
                             audioStream.close()
-                        } catch (_: Exception) {}
+                        } catch (e: Exception) {
+                            // Deliberate: stream completion cleanup
+                        }
                     }
                     "error" -> {
                         try {
                             audioStream.close()
-                        } catch (_: Exception) {}
+                        } catch (e: Exception) {
+                            // Deliberate: stream error cleanup
+                        }
                         val errMsg = try {
                             JSONObject(data).optString("error", "Stream error")
-                        } catch (_: Exception) {
+                        } catch (e: Exception) {
                             "Stream error: $data"
                         }
                         onError(errMsg)
@@ -133,7 +139,9 @@ class MirkuzVisionRepository(
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
                 try {
                     audioStream.close()
-                } catch (_: Exception) {}
+                } catch (e: Exception) {
+                    // Deliberate: connection failure cleanup
+                }
                 onError(t?.message ?: "SSE Connection failed")
             }
         })
@@ -202,7 +210,7 @@ class MirkuzVisionRepository(
                         val audioBase64 = resObj.optJSONObject("audio")?.optString("audioBase64")
 
                         if (!audioBase64.isNullOrEmpty()) {
-                            playBase64(audioBase64)
+                            playBase64(audioBase64, onError)
                         }
                         onSuccess(amharicText, audioBase64)
                     } else {
@@ -223,23 +231,32 @@ class MirkuzVisionRepository(
         activeSessionId = null
     }
 
-    private fun playFile(file: File) {
-        try {
+    private fun playFile(file: File, onError: ((String) -> Unit)? = null): Result<Unit> {
+        return try {
             stopCurrentSpeech()
             currentPlayer = MediaPlayer().apply {
                 setDataSource(file.absolutePath)
                 prepare()
                 start()
             }
-        } catch (_: Exception) {}
+            Result.success(Unit)
+        } catch (e: Exception) {
+            val errorMsg = e.localizedMessage ?: "Failed to play audio file"
+            onError?.invoke(errorMsg)
+            Result.failure(e)
+        }
     }
 
-    private fun playBase64(b64: String) {
-        try {
+    private fun playBase64(b64: String, onError: ((String) -> Unit)? = null): Result<Unit> {
+        return try {
             val audioBytes = Base64.decode(b64, Base64.DEFAULT)
             val tempFile = File.createTempFile("mirkuz_speech", ".mp3")
             FileOutputStream(tempFile).use { it.write(audioBytes) }
-            playFile(tempFile)
-        } catch (_: Exception) {}
+            playFile(tempFile, onError)
+        } catch (e: Exception) {
+            val errorMsg = e.localizedMessage ?: "Failed to decode/play audio"
+            onError?.invoke(errorMsg)
+            Result.failure(e)
+        }
     }
 }

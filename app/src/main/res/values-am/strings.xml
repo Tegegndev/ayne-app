@@ -20,6 +20,9 @@
     <string name="volume_hint_capture">ቅረጽ</string>
     <string name="volume_hint_followup">ተከታይ ጥያቄ</string>
     
+    <string name="error_audio_playback">የድምፅ ምላሹን ማጫወት አልተቻለም</string>
+    <string name="error_network">የኔትወርክ ግንኙነት ተቋርጧል። እባክዎ ኢንተርኔትዎን አረጋግጠው እንደገና ይሞክሩ።</string>
+    <string name="error_bad_response">የሰርቨር ምላሽ ስህተት አጋጥሟል። እባክዎ እንደገና ይሞክሩ።</string>
     <string name="snackbar_coming_soon">በቅርቡ ይጀምራል — ገና አልተገናኘም</string>
     <string name="snackbar_no_answer">እስካሁን ምንም ምላሽ የለም</string>
     <string name="camera_permission_granted">የካሜራ ፈቃድ ተሰጥቷል። ለመቃኘት ዝግጁ ነው።</string>

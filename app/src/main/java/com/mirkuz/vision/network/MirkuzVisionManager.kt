@@ -67,7 +67,9 @@ class MirkuzVisionManager(
                 it.release()
             }
             mediaPlayer = null
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            // Deliberate: ignore error when releasing an already stopped MediaPlayer instance
+        }
     }
 
     private fun triggerHaptic() {
@@ -78,7 +80,9 @@ class MirkuzVisionManager(
                 @Suppress("DEPRECATION")
                 vibrator?.vibrate(40)
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            // Deliberate: ignore vibrator failure on devices without haptic motor or missing permission
+        }
     }
 
     fun resetSession() {
@@ -188,20 +192,26 @@ class MirkuzVisionManager(
                                     playAudioFile(tempAudioFile)
                                 }
                             }
-                        } catch (_: Exception) {}
+                        } catch (e: Exception) {
+                            // Deliberate: non-fatal chunk decoding error
+                        }
                     }
                     "done" -> {
                         try {
                             audioOutputStream.close()
-                        } catch (_: Exception) {}
+                        } catch (e: Exception) {
+                            // Deliberate: stream completion cleanup
+                        }
                     }
                     "error" -> {
                         try {
                             audioOutputStream.close()
-                        } catch (_: Exception) {}
+                        } catch (e: Exception) {
+                            // Deliberate: stream error cleanup
+                        }
                         val errMsg = try {
                             JSONObject(data).optString("error", "Stream error")
-                        } catch (_: Exception) {
+                        } catch (e: Exception) {
                             "Stream error: $data"
                         }
                         onError(errMsg)
@@ -212,7 +222,9 @@ class MirkuzVisionManager(
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
                 try {
                     audioOutputStream.close()
-                } catch (_: Exception) {}
+                } catch (e: Exception) {
+                    // Deliberate: failure cleanup
+                }
                 onError(t?.message ?: "SSE Connection failed")
             }
         })
@@ -428,24 +440,33 @@ class MirkuzVisionManager(
     // ========================================================
     // AUDIO PLAYBACK HELPERS
     // ========================================================
-    fun playAudioFile(file: File) {
-        try {
+    fun playAudioFile(file: File, onError: ((String) -> Unit)? = null): Result<Unit> {
+        return try {
             stopSpeechAndFeedback()
             mediaPlayer = MediaPlayer().apply {
                 setDataSource(file.absolutePath)
                 prepare()
                 start()
             }
-        } catch (_: Exception) {}
+            Result.success(Unit)
+        } catch (e: Exception) {
+            val errorMsg = e.localizedMessage ?: "Failed to play audio file"
+            onError?.invoke(errorMsg)
+            Result.failure(e)
+        }
     }
 
-    fun playBase64Audio(base64Audio: String) {
-        try {
+    fun playBase64Audio(base64Audio: String, onError: ((String) -> Unit)? = null): Result<Unit> {
+        return try {
             val audioBytes = Base64.decode(base64Audio, Base64.DEFAULT)
             val tempFile = File.createTempFile("mirkuz_speech", ".mp3", context.cacheDir)
             FileOutputStream(tempFile).use { it.write(audioBytes) }
-            playAudioFile(tempFile)
-        } catch (_: Exception) {}
+            playAudioFile(tempFile, onError)
+        } catch (e: Exception) {
+            val errorMsg = e.localizedMessage ?: "Failed to decode/play audio"
+            onError?.invoke(errorMsg)
+            Result.failure(e)
+        }
     }
 
     private fun String.cleanPrefix(preferredLanguage: String? = null): String {

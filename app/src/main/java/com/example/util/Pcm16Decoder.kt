@@ -118,18 +118,25 @@ object Pcm16Decoder {
             val bytes = out.toByteArray()
             if (bytes.isEmpty()) return null
             return DecodedPcm(bytes, rate, channels)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            android.util.Log.e("Pcm16Decoder", "Failed to decode audio to PCM16: ${e.message}", e)
             return null
         } finally {
             try {
                 codec?.stop()
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                // Deliberate: ignore error when stopping already stopped codec
+            }
             try {
                 codec?.release()
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                // Deliberate: ignore error when releasing already released codec
+            }
             try {
                 extractor.release()
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                // Deliberate: ignore error when releasing extractor
+            }
         }
     }
 

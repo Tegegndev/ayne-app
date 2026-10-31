@@ -308,6 +308,19 @@ class AyneViewModel(
         const val LANGUAGE_PREFS_KEY_CHOSEN = "language_chosen"
     }
 
+    private fun mapFailureToUserMessage(context: Context, error: Throwable?): String {
+        return when {
+            error is java.io.IOException -> context.getString(R.string.error_network)
+            error != null && error.message?.contains("HTTP 5") == true -> context.getString(R.string.error_bad_response)
+            else -> context.getString(R.string.error_bad_response)
+        }
+    }
+
+    private fun handleAudioPlaybackError(context: Context, detail: String? = null) {
+        val message = context.getString(R.string.error_audio_playback)
+        _userMessage.tryEmit(message)
+    }
+
     fun showMessage(msg: String) {
         _userMessage.tryEmit(msg)
     }
@@ -978,7 +991,7 @@ class AyneViewModel(
                             rawBase64Chunk = chunkEvent.chunkBase64,
                             format = chunkEvent.format,
                             onError = { err ->
-                                _userMessage.tryEmit("Audio error: $err")
+                                handleAudioPlaybackError(context, err)
                             }
                         )
                     }
@@ -1067,7 +1080,7 @@ class AyneViewModel(
                             context = context,
                             rawBase64Audio = rawAudio,
                             onError = { err ->
-                                _userMessage.tryEmit("Audio error: $err")
+                                handleAudioPlaybackError(context, err)
                             }
                         )
                     } else if (chosenAnswer.isNotBlank()) {
@@ -1081,8 +1094,8 @@ class AyneViewModel(
                             busyMessage = null
                         )
                     }
-                    val errMsg = error.localizedMessage ?: "Network error connecting to $endpoint"
-                    _userMessage.tryEmit("Error: $errMsg")
+                    val errMsg = mapFailureToUserMessage(context, error)
+                    _userMessage.tryEmit(errMsg)
                 }
             } else if (streamResult.isFailure && receivedVision) {
                 _uiState.update {
@@ -1232,7 +1245,7 @@ class AyneViewModel(
                             rawBase64Chunk = chunkEv.chunkBase64,
                             format = chunkEv.format,
                             onError = { err ->
-                                _userMessage.tryEmit("Audio error: $err")
+                                handleAudioPlaybackError(context, err)
                             }
                         )
                     }
@@ -1369,7 +1382,7 @@ class AyneViewModel(
                             context = context,
                             rawBase64Audio = rawAudio,
                             onError = { err ->
-                                _userMessage.tryEmit("Audio error: $err")
+                                handleAudioPlaybackError(context, err)
                             }
                         )
                     } else if (chosenAnswer.isNotBlank()) {
@@ -1513,7 +1526,7 @@ class AyneViewModel(
                             rawBase64Chunk = chunkEvent.chunkBase64,
                             format = chunkEvent.format,
                             onError = { err ->
-                                _userMessage.tryEmit("Audio error: $err")
+                                handleAudioPlaybackError(context, err)
                             }
                         )
                     }
@@ -1595,7 +1608,7 @@ class AyneViewModel(
                             context = context,
                             rawBase64Audio = rawAudio,
                             onError = { err ->
-                                _userMessage.tryEmit("Audio error: $err")
+                                handleAudioPlaybackError(context, err)
                             }
                         )
                     } else if (chosenAnswer.isNotBlank()) {
@@ -1609,8 +1622,8 @@ class AyneViewModel(
                             busyMessage = null
                         )
                     }
-                    val errMsg = error.localizedMessage ?: "Network error connecting to $endpoint"
-                    _userMessage.tryEmit("Error: $errMsg")
+                    val errMsg = mapFailureToUserMessage(context, error)
+                    _userMessage.tryEmit(errMsg)
                 }
             } else if (streamResult.isFailure && receivedOcr) {
                 _uiState.update {
@@ -1661,7 +1674,7 @@ class AyneViewModel(
                     context = context,
                     rawBase64Audio = audioBase64,
                     onError = { err ->
-                        _userMessage.tryEmit("Audio error: $err")
+                        handleAudioPlaybackError(context, err)
                     }
                 )
             }
