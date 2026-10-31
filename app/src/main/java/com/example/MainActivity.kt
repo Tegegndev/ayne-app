@@ -139,6 +139,9 @@ import com.example.data.VisionApiService
 import com.example.data.VisionDescribeResponse
 import com.example.ui.AfaanOromooMockScreen
 import com.example.ui.EnglishMockScreen
+import com.example.data.endpoints.EndpointPath
+import com.example.data.endpoints.LanguageRouter
+import com.example.data.endpoints.Variant
 import com.example.ui.VoiceAskScreen
 import com.example.ui.theme.AyneDarkCard
 import com.example.ui.theme.AyneOnYellow
@@ -214,32 +217,14 @@ data class AyneUiState(
     val askQuestionLastAnswer: String? = null
 ) {
     companion object {
-        fun buildVisionUrl(base: String, language: String? = null): String {
-            val root = "${base.trim().trimEnd('/')}/api/see-and-describe"
-            return when (language?.lowercase()) {
-                "om", "oromo" -> "$root/om"
-                "am", "amharic" -> "$root/am"
-                else -> root
-            }
-        }
+        fun buildVisionUrl(base: String, language: String? = null): String =
+            LanguageRouter.resolve(base, language ?: "en", EndpointPath.SEE_AND_DESCRIBE, Variant.PLAIN)
 
-        fun buildReadTextUrl(base: String, language: String? = null): String {
-            val root = "${base.trim().trimEnd('/')}/api/read-text"
-            return when (language?.lowercase()) {
-                "om", "oromo" -> "$root/om"
-                "am", "amharic" -> "$root/am"
-                else -> root
-            }
-        }
+        fun buildReadTextUrl(base: String, language: String? = null): String =
+            LanguageRouter.resolve(base, language ?: "en", EndpointPath.READ_TEXT, Variant.PLAIN)
 
-        fun buildAskQuestionUrl(base: String, language: String? = null): String {
-            val root = "${base.trim().trimEnd('/')}/api/ask-question"
-            return when (language?.lowercase()) {
-                "om", "oromo" -> "$root/om"
-                "am", "amharic" -> "$root/am"
-                else -> root
-            }
-        }
+        fun buildAskQuestionUrl(base: String, language: String? = null): String =
+            LanguageRouter.resolve(base, language ?: "en", EndpointPath.ASK_QUESTION, Variant.PLAIN)
 
         val DEFAULT_BASE_URL: String by lazy {
             try {
@@ -1107,11 +1092,12 @@ class AyneViewModel(
                 SupportedLanguage.AFAN_OROMOO -> "om"
                 SupportedLanguage.AMHARIC -> "am"
             }
-            val endpoint = when (prefLang) {
-                "om" -> "${state.baseUrl.trimEnd('/')}/api/see-and-describe/om"
-                "am" -> "${state.baseUrl.trimEnd('/')}/api/see-and-describe/am"
-                else -> "${state.baseUrl.trimEnd('/')}/api/see-and-describe"
-            }
+            val endpoint = LanguageRouter.resolve(
+                baseUrl = state.baseUrl,
+                language = prefLang,
+                path = EndpointPath.SEE_AND_DESCRIBE,
+                variant = Variant.PLAIN
+            )
             val voice = if (state.selectedLanguage == SupportedLanguage.AFAN_OROMOO && !state.customVoice.startsWith("om-")) {
                 "om-ayyaantuu"
             } else if (state.selectedLanguage == SupportedLanguage.AMHARIC && state.customVoice.startsWith("om-")) {
@@ -1336,11 +1322,12 @@ class AyneViewModel(
                 SupportedLanguage.AFAN_OROMOO -> "om"
                 SupportedLanguage.AMHARIC -> "am"
             }
-            val askEndpoint = when (prefLang) {
-                "om" -> "${state.baseUrl.trimEnd('/')}/api/ask-question/om"
-                "am" -> "${state.baseUrl.trimEnd('/')}/api/ask-question/am"
-                else -> "${state.baseUrl.trimEnd('/')}/api/ask-question"
-            }
+            val askEndpoint = LanguageRouter.resolve(
+                baseUrl = state.baseUrl,
+                language = prefLang,
+                path = EndpointPath.ASK_QUESTION,
+                variant = Variant.PLAIN
+            )
             val voice = if (state.selectedLanguage == SupportedLanguage.AFAN_OROMOO && !state.customVoice.startsWith("om-")) {
                 "om-ayyaantuu"
             } else if (state.selectedLanguage == SupportedLanguage.AMHARIC && state.customVoice.startsWith("om-")) {
@@ -1644,11 +1631,12 @@ class AyneViewModel(
                 SupportedLanguage.AFAN_OROMOO -> "om"
                 SupportedLanguage.AMHARIC -> "am"
             }
-            val endpoint = when (prefLang) {
-                "om" -> "${state.baseUrl.trimEnd('/')}/api/read-text/om"
-                "am" -> "${state.baseUrl.trimEnd('/')}/api/read-text/am"
-                else -> "${state.baseUrl.trimEnd('/')}/api/read-text"
-            }
+            val endpoint = LanguageRouter.resolve(
+                baseUrl = state.baseUrl,
+                language = prefLang,
+                path = EndpointPath.READ_TEXT,
+                variant = Variant.PLAIN
+            )
             val voice = state.customVoice
             val ttsProvider = if (prefLang == "en") "gemini" else "addis"
 

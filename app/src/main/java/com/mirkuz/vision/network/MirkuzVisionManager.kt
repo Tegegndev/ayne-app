@@ -8,6 +8,9 @@ import android.os.Vibrator
 import android.os.VibratorManager
 import android.util.Base64
 import com.example.data.cleanLabelPrefix
+import com.example.data.endpoints.EndpointPath
+import com.example.data.endpoints.LanguageRouter
+import com.example.data.endpoints.Variant
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
@@ -127,7 +130,7 @@ class MirkuzVisionManager(
         }
 
         val request = Request.Builder()
-            .url("${serverBaseUrl.trimEnd('/')}/api/read-text/stream")
+            .url(LanguageRouter.resolve(serverBaseUrl, "am", EndpointPath.READ_TEXT, Variant.STREAM))
             .header("Accept", "text/event-stream")
             .header("Content-Type", "application/json")
             .post(payload.toString().toRequestBody("application/json".toMediaType()))
@@ -255,11 +258,12 @@ class MirkuzVisionManager(
             put("includeAudio", true)
         }
 
-        val requestUrl = when (preferredLanguage) {
-            "om" -> "${serverBaseUrl.trimEnd('/')}/api/see-and-describe/om"
-            "am" -> "${serverBaseUrl.trimEnd('/')}/api/see-and-describe/am"
-            else -> "${serverBaseUrl.trimEnd('/')}/api/see-and-describe"
-        }
+        val requestUrl = LanguageRouter.resolve(
+            baseUrl = serverBaseUrl,
+            language = preferredLanguage,
+            path = EndpointPath.SEE_AND_DESCRIBE,
+            variant = Variant.PLAIN
+        )
 
         val request = Request.Builder()
             .url(requestUrl)
@@ -356,11 +360,12 @@ class MirkuzVisionManager(
             put("includeAudio", true)
         }
 
-        val requestUrl = when (preferredLanguage) {
-            "om" -> "${serverBaseUrl.trimEnd('/')}/api/see-and-describe/om"
-            "am" -> "${serverBaseUrl.trimEnd('/')}/api/see-and-describe/am"
-            else -> "${serverBaseUrl.trimEnd('/')}/api/see-and-describe"
-        }
+        val requestUrl = LanguageRouter.resolve(
+            baseUrl = serverBaseUrl,
+            language = preferredLanguage,
+            path = EndpointPath.SEE_AND_DESCRIBE,
+            variant = Variant.PLAIN
+        )
 
         val request = Request.Builder()
             .url(requestUrl)

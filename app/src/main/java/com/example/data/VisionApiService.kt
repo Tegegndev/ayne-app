@@ -1,5 +1,8 @@
 package com.example.data
 
+import com.example.data.endpoints.EndpointPath
+import com.example.data.endpoints.LanguageRouter
+import com.example.data.endpoints.Variant
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -86,22 +89,12 @@ class VisionApiService(
             val mediaType = "application/json; charset=utf-8".toMediaType()
             val requestBody = jsonPayload.toString().toRequestBody(mediaType)
 
-            val targetUrl = when (preferredLanguage) {
-                "om" -> {
-                    if (endpointUrl.endsWith("/see-and-describe/om")) endpointUrl
-                    else if (endpointUrl.contains("/see-and-describe")) endpointUrl.replace(Regex("/see-and-describe(?:/(?:am|om))?"), "/see-and-describe/om")
-                    else "${endpointUrl.trimEnd('/')}/api/see-and-describe/om"
-                }
-                "am" -> {
-                    if (endpointUrl.endsWith("/see-and-describe/am")) endpointUrl
-                    else if (endpointUrl.contains("/see-and-describe")) endpointUrl.replace(Regex("/see-and-describe(?:/(?:am|om))?"), "/see-and-describe/am")
-                    else "${endpointUrl.trimEnd('/')}/api/see-and-describe/am"
-                }
-                else -> {
-                    if (endpointUrl.contains("/see-and-describe")) endpointUrl.replace(Regex("/see-and-describe(?:/(?:am|om))?"), "/see-and-describe")
-                    else endpointUrl
-                }
-            }
+            val targetUrl = LanguageRouter.resolve(
+                baseUrl = endpointUrl,
+                language = preferredLanguage,
+                path = EndpointPath.SEE_AND_DESCRIBE,
+                variant = Variant.PLAIN
+            )
 
             val request = Request.Builder()
                 .url(targetUrl)
@@ -149,25 +142,12 @@ class VisionApiService(
         onDone: () -> Unit
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            val streamUrl = when (preferredLanguage) {
-                "om" -> {
-                    if (baseEndpointUrl.endsWith("/stream")) baseEndpointUrl
-                    else if (baseEndpointUrl.endsWith("/see-and-describe/om")) "$baseEndpointUrl/stream"
-                    else if (baseEndpointUrl.contains("/see-and-describe")) baseEndpointUrl.replace(Regex("/see-and-describe(?:/(?:am|om))?"), "/see-and-describe/om") + "/stream"
-                    else "${baseEndpointUrl.trimEnd('/')}/api/see-and-describe/om/stream"
-                }
-                "am" -> {
-                    if (baseEndpointUrl.endsWith("/stream")) baseEndpointUrl
-                    else if (baseEndpointUrl.endsWith("/see-and-describe/am")) "$baseEndpointUrl/stream"
-                    else if (baseEndpointUrl.contains("/see-and-describe")) baseEndpointUrl.replace(Regex("/see-and-describe(?:/(?:am|om))?"), "/see-and-describe/am") + "/stream"
-                    else "${baseEndpointUrl.trimEnd('/')}/api/see-and-describe/am/stream"
-                }
-                else -> {
-                    if (baseEndpointUrl.endsWith("/stream")) baseEndpointUrl
-                    else if (baseEndpointUrl.contains("/see-and-describe")) baseEndpointUrl.replace(Regex("/see-and-describe(?:/(?:am|om))?"), "/see-and-describe") + "/stream"
-                    else "${baseEndpointUrl.trimEnd('/')}/api/see-and-describe/stream"
-                }
-            }
+            val streamUrl = LanguageRouter.resolve(
+                baseUrl = baseEndpointUrl,
+                language = preferredLanguage,
+                path = EndpointPath.SEE_AND_DESCRIBE,
+                variant = Variant.STREAM
+            )
 
             val jsonPayload = JSONObject().apply {
                 if (!sessionId.isNullOrBlank() && imageBase64.isNullOrBlank()) {
@@ -350,22 +330,12 @@ class VisionApiService(
             val mediaType = "application/json; charset=utf-8".toMediaType()
             val requestBody = jsonPayload.toString().toRequestBody(mediaType)
 
-            val targetUrl = when (preferredLanguage) {
-                "om" -> {
-                    if (endpointUrl.endsWith("/read-text/om")) endpointUrl
-                    else if (endpointUrl.contains("/read-text")) endpointUrl.replace(Regex("/read-text(-and-signs)?(?:/(?:am|om))?"), "/read-text/om")
-                    else "${endpointUrl.trimEnd('/')}/api/read-text/om"
-                }
-                "am" -> {
-                    if (endpointUrl.endsWith("/read-text/am")) endpointUrl
-                    else if (endpointUrl.contains("/read-text")) endpointUrl.replace(Regex("/read-text(-and-signs)?(?:/(?:am|om))?"), "/read-text/am")
-                    else "${endpointUrl.trimEnd('/')}/api/read-text/am"
-                }
-                else -> {
-                    if (endpointUrl.contains("/read-text")) endpointUrl.replace(Regex("/read-text(-and-signs)?(?:/(?:am|om))?"), "/read-text")
-                    else endpointUrl
-                }
-            }
+            val targetUrl = LanguageRouter.resolve(
+                baseUrl = endpointUrl,
+                language = preferredLanguage,
+                path = EndpointPath.READ_TEXT,
+                variant = Variant.PLAIN
+            )
 
             val request = Request.Builder()
                 .url(targetUrl)
@@ -411,25 +381,12 @@ class VisionApiService(
         onDone: () -> Unit
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            val streamUrl = when (preferredLanguage) {
-                "om" -> {
-                    if (baseEndpointUrl.endsWith("/stream")) baseEndpointUrl
-                    else if (baseEndpointUrl.endsWith("/read-text/om")) "$baseEndpointUrl/stream"
-                    else if (baseEndpointUrl.contains("/read-text")) baseEndpointUrl.replace(Regex("/read-text(-and-signs)?(?:/(?:am|om))?"), "/read-text/om") + "/stream"
-                    else "${baseEndpointUrl.trimEnd('/')}/api/read-text/om/stream"
-                }
-                "am" -> {
-                    if (baseEndpointUrl.endsWith("/stream")) baseEndpointUrl
-                    else if (baseEndpointUrl.endsWith("/read-text/am")) "$baseEndpointUrl/stream"
-                    else if (baseEndpointUrl.contains("/read-text")) baseEndpointUrl.replace(Regex("/read-text(-and-signs)?(?:/(?:am|om))?"), "/read-text/am") + "/stream"
-                    else "${baseEndpointUrl.trimEnd('/')}/api/read-text/am/stream"
-                }
-                else -> {
-                    if (baseEndpointUrl.endsWith("/stream")) baseEndpointUrl
-                    else if (baseEndpointUrl.contains("/read-text")) baseEndpointUrl.replace(Regex("/read-text(-and-signs)?(?:/(?:am|om))?"), "/read-text") + "/stream"
-                    else "${baseEndpointUrl.trimEnd('/')}/api/read-text/stream"
-                }
-            }
+            val streamUrl = LanguageRouter.resolve(
+                baseUrl = baseEndpointUrl,
+                language = preferredLanguage,
+                path = EndpointPath.READ_TEXT,
+                variant = Variant.STREAM
+            )
 
             val jsonPayload = JSONObject().apply {
                 put("imageBase64", imageBase64)
@@ -569,28 +526,12 @@ class VisionApiService(
         onDone: () -> Unit
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            val streamUrl = when (preferredLanguage) {
-                "om" -> {
-                    if (baseEndpointUrl.endsWith("/stream")) baseEndpointUrl
-                    else if (baseEndpointUrl.endsWith("/ask-question/om")) "$baseEndpointUrl/stream"
-                    else if (baseEndpointUrl.contains("/ask-question")) baseEndpointUrl.replace(Regex("/ask-question(?:/(?:am|om))?"), "/ask-question/om") + "/stream"
-                    else if (baseEndpointUrl.contains("/see-and-describe")) baseEndpointUrl.replace(Regex("/see-and-describe(?:/(?:am|om))?"), "/ask-question/om") + "/stream"
-                    else "${baseEndpointUrl.trimEnd('/')}/api/ask-question/om/stream"
-                }
-                "am" -> {
-                    if (baseEndpointUrl.endsWith("/stream")) baseEndpointUrl
-                    else if (baseEndpointUrl.endsWith("/ask-question/am")) "$baseEndpointUrl/stream"
-                    else if (baseEndpointUrl.contains("/ask-question")) baseEndpointUrl.replace(Regex("/ask-question(?:/(?:am|om))?"), "/ask-question/am") + "/stream"
-                    else if (baseEndpointUrl.contains("/see-and-describe")) baseEndpointUrl.replace(Regex("/see-and-describe(?:/(?:am|om))?"), "/ask-question/am") + "/stream"
-                    else "${baseEndpointUrl.trimEnd('/')}/api/ask-question/am/stream"
-                }
-                else -> {
-                    if (baseEndpointUrl.endsWith("/stream")) baseEndpointUrl
-                    else if (baseEndpointUrl.contains("/ask-question")) baseEndpointUrl.replace(Regex("/ask-question(?:/(?:am|om))?"), "/ask-question") + "/stream"
-                    else if (baseEndpointUrl.contains("/see-and-describe")) baseEndpointUrl.replace(Regex("/see-and-describe(?:/(?:am|om))?"), "/ask-question") + "/stream"
-                    else "${baseEndpointUrl.trimEnd('/')}/api/ask-question/stream"
-                }
-            }
+            val streamUrl = LanguageRouter.resolve(
+                baseUrl = baseEndpointUrl,
+                language = preferredLanguage,
+                path = EndpointPath.ASK_QUESTION,
+                variant = Variant.STREAM
+            )
 
             val jsonPayload = JSONObject().apply {
                 if (!sessionId.isNullOrBlank()) {
@@ -759,28 +700,12 @@ class VisionApiService(
         includeAudio: Boolean = true
     ): Result<VisionDescribeResponse> = withContext(Dispatchers.IO) {
         try {
-            val resolvedUrl = when (preferredLanguage) {
-                "om" -> {
-                    val clean = if (endpointUrl.endsWith("/stream")) endpointUrl.removeSuffix("/stream") else endpointUrl
-                    if (clean.endsWith("/ask-question/om")) clean
-                    else if (clean.contains("/ask-question")) clean.replace(Regex("/ask-question(?:/(?:am|om))?"), "/ask-question/om")
-                    else if (clean.contains("/see-and-describe")) clean.replace(Regex("/see-and-describe(?:/(?:am|om))?"), "/ask-question/om")
-                    else "${clean.trimEnd('/')}/api/ask-question/om"
-                }
-                "am" -> {
-                    val clean = if (endpointUrl.endsWith("/stream")) endpointUrl.removeSuffix("/stream") else endpointUrl
-                    if (clean.endsWith("/ask-question/am")) clean
-                    else if (clean.contains("/ask-question")) clean.replace(Regex("/ask-question(?:/(?:am|om))?"), "/ask-question/am")
-                    else if (clean.contains("/see-and-describe")) clean.replace(Regex("/see-and-describe(?:/(?:am|om))?"), "/ask-question/am")
-                    else "${clean.trimEnd('/')}/api/ask-question/am"
-                }
-                else -> {
-                    val clean = if (endpointUrl.endsWith("/stream")) endpointUrl.removeSuffix("/stream") else endpointUrl
-                    if (clean.contains("/ask-question")) clean.replace(Regex("/ask-question(?:/(?:am|om))?"), "/ask-question")
-                    else if (clean.contains("/see-and-describe")) clean.replace(Regex("/see-and-describe(?:/(?:am|om))?"), "/ask-question")
-                    else "${clean.trimEnd('/')}/api/ask-question"
-                }
-            }
+            val resolvedUrl = LanguageRouter.resolve(
+                baseUrl = endpointUrl,
+                language = preferredLanguage,
+                path = EndpointPath.ASK_QUESTION,
+                variant = Variant.PLAIN
+            )
 
             val jsonPayload = JSONObject().apply {
                 if (!sessionId.isNullOrBlank()) {

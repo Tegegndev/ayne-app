@@ -1,6 +1,9 @@
 package com.example.data
 
 import android.media.MediaPlayer
+import com.example.data.endpoints.EndpointPath
+import com.example.data.endpoints.LanguageRouter
+import com.example.data.endpoints.Variant
 import android.util.Base64
 import okhttp3.Call
 import okhttp3.Callback
@@ -62,7 +65,7 @@ class MirkuzVisionRepository(
         }
 
         val request = Request.Builder()
-            .url("${serverBaseUrl.trimEnd('/')}/api/read-text/stream")
+            .url(LanguageRouter.resolve(serverBaseUrl, "am", EndpointPath.READ_TEXT, Variant.STREAM))
             .header("Accept", "text/event-stream")
             .header("Content-Type", "application/json")
             .post(json.toString().toRequestBody("application/json".toMediaType()))
@@ -165,11 +168,12 @@ class MirkuzVisionRepository(
             put("includeAudio", true)
         }
 
-        val targetUrl = when (preferredLanguage) {
-            "om" -> "${serverBaseUrl.trimEnd('/')}/api/see-and-describe/om"
-            "am" -> "${serverBaseUrl.trimEnd('/')}/api/see-and-describe/am"
-            else -> "${serverBaseUrl.trimEnd('/')}/api/see-and-describe"
-        }
+        val targetUrl = LanguageRouter.resolve(
+            baseUrl = serverBaseUrl,
+            language = preferredLanguage,
+            path = EndpointPath.SEE_AND_DESCRIBE,
+            variant = Variant.PLAIN
+        )
 
         val request = Request.Builder()
             .url(targetUrl)
