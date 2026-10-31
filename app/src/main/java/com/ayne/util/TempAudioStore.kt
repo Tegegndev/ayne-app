@@ -7,6 +7,7 @@ import java.io.File
 object TempAudioStore {
     private const val TAG = "TempAudioStore"
     const val MAX_RETAINED_FILES = 3
+    const val STREAM_CHUNK_PREFIX = "ayne_chunk_"
     private const val AUDIO_DIR_NAME = "audio"
 
     private var applicationContext: Context? = null
@@ -32,7 +33,10 @@ object TempAudioStore {
         suffix: String = ".mp3"
     ): File {
         val audioDir = getAudioDir(context)
-        pruneToLimit(audioDir, MAX_RETAINED_FILES - 1)
+        // Prune completed turns only; active streaming chunks manage their own playback lifecycle
+        if (!prefix.startsWith(STREAM_CHUNK_PREFIX)) {
+            pruneToLimit(audioDir, MAX_RETAINED_FILES - 1)
+        }
         return File.createTempFile(prefix, suffix, audioDir)
     }
 
@@ -66,7 +70,7 @@ object TempAudioStore {
     }
 
     private fun pruneToLimit(audioDir: File, maxRetained: Int) {
-        val files = audioDir.listFiles()?.filter { it.isFile } ?: return
+        val files = audioDir.listFiles()?.filter { it.isFile && !it.name.startsWith(STREAM_CHUNK_PREFIX) } ?: return
         if (files.size <= maxRetained) return
 
         val sortedFiles = files.sortedBy { it.lastModified() }

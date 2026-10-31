@@ -38,6 +38,26 @@ class TempAudioStoreTest {
     }
 
     @Test
+    fun testStreamChunksNotPrunedDuringMultiChunkStream() {
+        val audioDir = TempAudioStore.getAudioDir(context)
+
+        // Simulate 6 streaming chunks arriving in rapid succession
+        val chunkFiles = mutableListOf<java.io.File>()
+        for (i in 1..6) {
+            val chunk = TempAudioStore.createTempAudioFile(context, TempAudioStore.STREAM_CHUNK_PREFIX, ".mp3")
+            chunk.writeText("chunk $i")
+            chunkFiles.add(chunk)
+        }
+
+        // All 6 chunks must remain alive while stream is active
+        val activeChunks = audioDir.listFiles()?.filter { it.name.startsWith(TempAudioStore.STREAM_CHUNK_PREFIX) } ?: emptyList()
+        assertEquals(6, activeChunks.size)
+
+        // Clean up
+        chunkFiles.forEach { it.delete() }
+    }
+
+    @Test
     fun testClearDeletesAllFiles() {
         val audioDir = TempAudioStore.getAudioDir(context)
 

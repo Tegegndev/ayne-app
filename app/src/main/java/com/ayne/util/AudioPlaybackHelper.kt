@@ -19,6 +19,9 @@ class AudioPlaybackHelper {
     @Volatile
     private var queuePlayedAny = false
 
+    /** Trailing incomplete MP3 frame bytes buffered from the previous chunk. */
+    private var pendingMp3Bytes: ByteArray = ByteArray(0)
+
     /** Consecutive unplayable chunks in a row (reset on every successful play). */
     @Volatile
     private var consecutiveChunkFailures = 0
@@ -65,12 +68,26 @@ class AudioPlaybackHelper {
             }
             if (cleanBase64.isBlank()) return
 
-            val audioBytes = Base64.decode(cleanBase64, Base64.DEFAULT)
-            if (audioBytes.isEmpty()) {
+            val rawAudioBytes = Base64.decode(cleanBase64, Base64.DEFAULT)
+            if (rawAudioBytes.isEmpty()) {
                 // Streaming servers occasionally emit empty segments; nothing
                 // playable here and nothing worth surfacing to the user.
                 return
             }
+
+            // Align MP3 frame boundaries so every standalone chunk file contains complete frames
+            val audioBytes = if (format.equals("mp3", ignoreCase = true)) {
+                val combined = if (pendingMp3Bytes.isNotEmpty()) pendingMp3Bytes + rawAudioBytes else rawAudioBytes
+                val split = Mp3FrameAligner.splitAtLastCompleteFrame(combined)
+                pendingMp3Bytes = split.trailingBytes
+                if (split.completeBytes.isEmpty()) {
+                    return
+                }
+                split.completeBytes
+            } else {
+                rawAudioBytes
+            }
+
             val ext = if (format.equals("wav", ignoreCase = true)) ".wav" else ".mp3"
             val tempChunkFile = TempAudioStore.createTempAudioFile(context, "ayne_chunk_", ext).apply {
                 deleteOnExit()
@@ -83,11 +100,39 @@ class AudioPlaybackHelper {
             chunkQueue.add(tempChunkFile)
 
             if (!isPlayingQueue) {
-                onFirstChunkPlay?.invoke()
+                if (!queuePlayedAny) {
+                    onFirstChunkPlay?.invoke()
+                }
                 playNextChunkInQueue(onError)
             }
         } catch (e: Exception) {
             onError?.invoke(e.localizedMessage ?: "Failed to process audio chunk")
+        }
+    }
+
+    /**
+     * Flushes any remaining residual audio bytes once the stream ends.
+     */
+    @Synchronized
+    fun finishStream(context: Context, onError: ((String) -> Unit)? = null) {
+        if (pendingMp3Bytes.isNotEmpty()) {
+            val trailing = pendingMp3Bytes
+            pendingMp3Bytes = ByteArray(0)
+            try {
+                val tempChunkFile = TempAudioStore.createTempAudioFile(context, "ayne_chunk_", ".mp3").apply {
+                    deleteOnExit()
+                }
+                FileOutputStream(tempChunkFile).use { fos ->
+                    fos.write(trailing)
+                    fos.flush()
+                }
+                chunkQueue.add(tempChunkFile)
+                if (!isPlayingQueue) {
+                    playNextChunkInQueue(onError)
+                }
+            } catch (e: Exception) {
+                // Ignore trailing flush error
+            }
         }
     }
 
@@ -291,6 +336,7 @@ class AudioPlaybackHelper {
         isPlayingQueue = false
         queuePlayedAny = false
         consecutiveChunkFailures = 0
+        pendingMp3Bytes = ByteArray(0)
         while (chunkQueue.isNotEmpty()) {
             try {
                 chunkQueue.poll()?.delete()

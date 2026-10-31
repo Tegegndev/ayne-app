@@ -485,7 +485,7 @@ class AyneViewModel(
                         })
                     }
 
-                    if (amplitude >= vadSpeechThreshold) {
+                    if (listenedMs >= 150L && amplitude >= vadSpeechThreshold) {
                         if (!hasSpoken) {
                             // Barge-In: user started speaking — immediately mute speaker
                             hasSpoken = true
@@ -1000,6 +1000,7 @@ class AyneViewModel(
                     // otherwise the mic hears the old answer instead of the user.
                 },
                 onDone = {
+                    audioPlaybackHelper.finishStream(context)
                     _uiState.update {
                         it.copy(
                             isBusy = false,
@@ -1098,11 +1099,15 @@ class AyneViewModel(
                     _userMessage.tryEmit(errMsg)
                 }
             } else if (streamResult.isFailure && receivedVision) {
+                processingFeedbackHelper?.stopWorkingFeedback()
                 _uiState.update {
                     it.copy(
                         isBusy = false,
                         busyMessage = null
                     )
+                }
+                if (audioChunks.isEmpty() && !spokenThisTurn.isNullOrBlank()) {
+                    synthesizeAndPlayTtsFallback(context, spokenThisTurn!!, _uiState.value)
                 }
             }
         }
@@ -1299,6 +1304,7 @@ class AyneViewModel(
                     // An expired-session pass ends silently here; the self-heal
                     // retry below owns the outcome instead.
                     if (!(sessionExpired && !receivedAnswer)) {
+                        audioPlaybackHelper.finishStream(context)
                         _uiState.update {
                             it.copy(
                                 isBusy = false,
@@ -1404,11 +1410,15 @@ class AyneViewModel(
                     _userMessage.tryEmit(errorPrompt)
                 }
             } else if (streamResult.isFailure && receivedAnswer) {
+                processingFeedbackHelper?.stopWorkingFeedback()
                 _uiState.update {
                     it.copy(
                         isBusy = false,
                         busyMessage = null
                     )
+                }
+                if (audioChunks.isEmpty() && !spokenThisTurn.isNullOrBlank()) {
+                    synthesizeAndPlayTtsFallback(context, spokenThisTurn!!, _uiState.value)
                 }
             }
 
@@ -1533,6 +1543,7 @@ class AyneViewModel(
                     // else: never feed the speaker while the user is recording.
                 },
                 onDone = {
+                    audioPlaybackHelper.finishStream(context)
                     _uiState.update {
                         it.copy(
                             isBusy = false,
@@ -1626,11 +1637,18 @@ class AyneViewModel(
                     _userMessage.tryEmit(errMsg)
                 }
             } else if (streamResult.isFailure && receivedOcr) {
+                processingFeedbackHelper?.stopWorkingFeedback()
                 _uiState.update {
                     it.copy(
                         isBusy = false,
                         busyMessage = null
                     )
+                }
+                if (audioChunks.isEmpty()) {
+                    val answerToSpeak = _uiState.value.lastAnswer
+                    if (!answerToSpeak.isNullOrBlank()) {
+                        synthesizeAndPlayTtsFallback(context, answerToSpeak, _uiState.value)
+                    }
                 }
             }
         }
