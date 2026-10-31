@@ -68,30 +68,19 @@ jobs:
         run: |
           KEYSTORE_FILE="${{ github.workspace }}/release-upload.jks"
 
-          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
-            echo "Using custom release keystore from repository secrets..."
-            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$KEYSTORE_FILE"
-            echo "KEYSTORE_PATH=$KEYSTORE_FILE" >> $GITHUB_ENV
-            echo "STORE_PASSWORD=${{ secrets.STORE_PASSWORD }}" >> $GITHUB_ENV
-            echo "KEY_ALIAS=${{ secrets.KEY_ALIAS || 'upload' }}" >> $GITHUB_ENV
-            echo "KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}" >> $GITHUB_ENV
-          else
-            echo "No KEYSTORE_BASE64 secret found. Creating self-signed release keystore for GitHub distribution..."
-            keytool -genkeypair -v \
-              -keystore "$KEYSTORE_FILE" \
-              -alias upload \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 10000 \
-              -storepass "ayneReleaseKeyPass" \
-              -keypass "ayneReleaseKeyPass" \
-              -dname "CN=Ayne, OU=Mobile, O=Ayne App, L=Addis Ababa, C=ET"
-
-            echo "KEYSTORE_PATH=$KEYSTORE_FILE" >> $GITHUB_ENV
-            echo "STORE_PASSWORD=ayneReleaseKeyPass" >> $GITHUB_ENV
-            echo "KEY_ALIAS=upload" >> $GITHUB_ENV
-            echo "KEY_PASSWORD=ayneReleaseKeyPass" >> $GITHUB_ENV
+          if [ -z "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "::error::Missing KEYSTORE_BASE64 secret."
+            echo "::error::Configure repository secrets first: KEYSTORE_BASE64, STORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD."
+            echo "::error::See README (Releases section) for setup instructions."
+            exit 1
           fi
+
+          echo "Decoding release keystore from repository secrets..."
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$KEYSTORE_FILE"
+          echo "KEYSTORE_PATH=$KEYSTORE_FILE" >> $GITHUB_ENV
+          echo "STORE_PASSWORD=${{ secrets.STORE_PASSWORD }}" >> $GITHUB_ENV
+          echo "KEY_ALIAS=${{ secrets.KEY_ALIAS || 'upload' }}" >> $GITHUB_ENV
+          echo "KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}" >> $GITHUB_ENV
 
       - name: Grant Execute Permission to Gradlew
         run: chmod +x gradlew

@@ -200,6 +200,25 @@ Or tag manually. Pushing a `v*` tag triggers the [Build & Publish Release workfl
 git tag v1.0.1 && git push origin v1.0.1
 ```
 
+### Release signing
+
+CI signs releases with secrets configured on the repository (**Settings → Secrets and variables → Actions**). The workflow fails if they're missing — it never falls back to a generated key.
+
+| Secret | Value |
+| --- | --- |
+| `KEYSTORE_BASE64` | Release keystore, base64-encoded (`base64 -w0 my-upload-key.jks`) |
+| `STORE_PASSWORD` | Keystore password |
+| `KEY_ALIAS` | Key alias (`upload`) |
+| `KEY_PASSWORD` | Key password |
+
+Generate a keystore and prepare these values with the helper script:
+
+```bash
+./scripts/setup-signing-secrets.sh
+```
+
+Keep `my-upload-key.jks` backed up — losing it means installed releases can never be upgraded, only reinstalled.
+
 ## Accessibility design
 
 Accessibility is the product, not a checkbox:

@@ -22,6 +22,7 @@ skills-lock.json
 # Keystores & Signing keys
 *.jks
 *.keystore
+*.b64
 my-upload-key.jks
 release.jks
 
