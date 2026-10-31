@@ -1162,13 +1162,19 @@ fun AyneScreenContent(
                     SupportedLanguage.AFAN_OROMOO -> "Gaaffii fi qorannoo · Tuqi ykn Volume− dhiibi"
                     SupportedLanguage.AMHARIC -> "የቀጥታ ጥያቄና መልስ · ለመጠየቅ ይጫኑ ወይም Volume−"
                 }
+                val askBadge = when (uiState.selectedLanguage) {
+                    SupportedLanguage.ENGLISH -> "Experimental"
+                    SupportedLanguage.AFAN_OROMOO -> "Yaalii"
+                    SupportedLanguage.AMHARIC -> "የሙከራ"
+                }
                 AyneActionCard(
                     icon = Icons.Filled.QuestionAnswer,
                     title = stringResource(R.string.ask_question_title),
                     subtitle = askSubtitle,
                     contentDescription = stringResource(R.string.ask_question_desc),
                     testTag = "card_ask_question",
-                    onClick = onAskQuestionClick
+                    onClick = onAskQuestionClick,
+                    badge = askBadge
                 )
             }
         }

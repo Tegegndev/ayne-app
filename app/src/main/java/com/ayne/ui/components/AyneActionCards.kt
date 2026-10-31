@@ -40,7 +40,8 @@ fun AyneActionCard(
     contentDescription: String,
     testTag: String,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    badge: String? = null
 ) {
     Surface(
         onClick = onClick,
@@ -55,7 +56,7 @@ fun AyneActionCard(
             .testTag(testTag)
             .semantics(mergeDescendants = true) {
                 role = Role.Button
-                this.contentDescription = contentDescription
+                this.contentDescription = if (badge != null) "$contentDescription ($badge)" else contentDescription
             },
         shape = RoundedCornerShape(16.dp),
         color = AynePureBlack,
@@ -96,6 +97,22 @@ fun AyneActionCard(
                     fontSize = 16.sp,
                     lineHeight = 22.sp
                 )
+                if (badge != null) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = badge,
+                        color = AyneVibrantYellow,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .border(
+                                width = 1.dp,
+                                color = AyneVibrantYellow.copy(alpha = 0.6f),
+                                shape = RoundedCornerShape(6.dp)
+                            )
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
+                }
             }
         }
     }

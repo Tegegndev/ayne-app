@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Mic
@@ -145,7 +146,12 @@ fun VoiceAskScreen(
     ) {
         val orbSize = minOf(300.dp, maxWidth * 0.8f).coerceAtLeast(220.dp)
 
-        // ---- Top row: close + new chat ----
+        // ---- Top row: close + experimental tag + new chat ----
+        val experimentalLabel = when (uiState.selectedLanguage) {
+            SupportedLanguage.ENGLISH -> "Experimental"
+            SupportedLanguage.AFAN_OROMOO -> "Yaalii"
+            SupportedLanguage.AMHARIC -> "የሙከራ"
+        }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -177,6 +183,23 @@ fun VoiceAskScreen(
                 )
             }
 
+            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                Text(
+                    text = experimentalLabel,
+                    color = AyneVibrantYellow.copy(alpha = 0.75f),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .border(
+                            1.dp,
+                            AyneVibrantYellow.copy(alpha = 0.4f),
+                            RoundedCornerShape(8.dp)
+                        )
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                        .semantics { contentDescription = "Experimental feature. $experimentalLabel" }
+                )
+            }
+
             if (uiState.askQuestionHistory.isNotEmpty()) {
                 val clearDesc = when (uiState.selectedLanguage) {
                     SupportedLanguage.ENGLISH -> "Start a new conversation"
@@ -201,6 +224,8 @@ fun VoiceAskScreen(
                         modifier = Modifier.size(24.dp)
                     )
                 }
+            } else {
+                Spacer(modifier = Modifier.size(48.dp))
             }
         }
 
