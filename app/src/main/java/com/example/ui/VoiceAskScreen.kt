@@ -67,8 +67,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.AyneUiState
-import com.example.SupportedLanguage
+import com.example.viewmodel.AyneUiState
+import com.example.viewmodel.SupportedLanguage
 import com.example.ui.theme.AyneDarkCard
 import com.example.ui.theme.AyneOnYellow
 import com.example.ui.theme.AynePureBlack

@@ -36,12 +36,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.AyneAction
-import com.example.AyneActionCard
-import com.example.AyneCompanionPanel
-import com.example.AyneTopBar
-import com.example.AyneUiState
-import com.example.SupportedLanguage
+import com.example.ui.components.AyneActionCard
+import com.example.ui.components.AyneCompanionPanel
+import com.example.ui.components.AyneTopBar
+import com.example.viewmodel.AyneAction
+import com.example.viewmodel.AyneUiState
+import com.example.viewmodel.SupportedLanguage
 import com.example.ui.theme.*
 
 /**

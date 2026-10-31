@@ -3,6 +3,7 @@ package com.example
 import com.example.data.AskQuestionAnswerEvent
 import com.example.data.AskQuestionDoneEvent
 import com.example.data.AskQuestionTranscriptionEvent
+import com.example.viewmodel.AyneUiState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull

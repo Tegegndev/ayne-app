@@ -1,5 +1,10 @@
 package com.example
 
+import com.example.domain.generateCompanionFallbackAnswer
+import com.example.viewmodel.AyneAction
+import com.example.viewmodel.AyneUiState
+import com.example.viewmodel.AyneViewModel
+import com.example.viewmodel.SupportedLanguage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
