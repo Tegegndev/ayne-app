@@ -18,3 +18,10 @@ local.properties
 debug.keystore
 .agents/
 skills-lock.json
+
+# Keystores & Signing keys
+*.jks
+*.keystore
+my-upload-key.jks
+release.jks
+
