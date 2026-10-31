@@ -16,11 +16,7 @@ import java.io.InputStreamReader
 import java.util.concurrent.TimeUnit
 
 class VisionApiService(
-    private val client: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
-        .build()
+    private val client: OkHttpClient = HttpClientProvider.okHttpClient
 ) {
 
     /**
@@ -41,80 +37,73 @@ class VisionApiService(
         mode: String = "general",
         includeAudio: Boolean = true
     ): Result<VisionDescribeResponse> = withContext(Dispatchers.IO) {
-        try {
-            val jsonPayload = JSONObject().apply {
-                if (!sessionId.isNullOrBlank() && imageBase64.isNullOrBlank()) {
-                    // Turn 2+: Zero-Upload follow-up! Send ONLY sessionId / chatId
-                    put("sessionId", sessionId)
-                    put("chatId", sessionId)
-                } else if (!imageBase64.isNullOrBlank()) {
-                    put("imageBase64", imageBase64)
-                    if (!sessionId.isNullOrBlank()) {
+        HttpRetryHelper.executeWithRetry {
+            try {
+                val jsonPayload = JSONObject().apply {
+                    if (!sessionId.isNullOrBlank() && imageBase64.isNullOrBlank()) {
+                        // Turn 2+: Zero-Upload follow-up! Send ONLY sessionId / chatId
+                        put("sessionId", sessionId)
+                        put("chatId", sessionId)
+                    } else if (!imageBase64.isNullOrBlank()) {
+                        put("imageBase64", imageBase64)
+                        if (!sessionId.isNullOrBlank()) {
+                            put("sessionId", sessionId)
+                            put("chatId", sessionId)
+                        }
+                    } else if (!sessionId.isNullOrBlank()) {
                         put("sessionId", sessionId)
                         put("chatId", sessionId)
                     }
-                } else if (!sessionId.isNullOrBlank()) {
-                    put("sessionId", sessionId)
-                    put("chatId", sessionId)
-                }
 
-                if (!audioBase64.isNullOrBlank()) {
-                    put("audioBase64", audioBase64)
-                }
-                if (!query.isNullOrBlank()) {
-                    put("query", query)
-                }
-                put("customVoice", customVoice)
-                put("ttsProvider", ttsProvider)
-                put("preferredLanguage", preferredLanguage)
-                put("mode", mode)
-                put("includeAudio", includeAudio)
-
-                // Only send client history if there is NO active sessionId.
-                // When sessionId is present, the server ALREADY caches the visual session and prior conversation.
-                // Sending client history alongside sessionId causes duplicate turns on the server,
-                // bloating LLM context and degrading response latency after 2+ turns.
-                if (sessionId.isNullOrBlank() && history.isNotEmpty()) {
-                    val historyArray = org.json.JSONArray()
-                    history.takeLast(6).forEach { turn ->
-                        historyArray.put(JSONObject().apply {
-                            put("role", turn.role)
-                            put("text", turn.text)
-                        })
+                    if (!audioBase64.isNullOrBlank()) {
+                        put("audioBase64", audioBase64)
                     }
-                    put("history", historyArray)
+                    if (!query.isNullOrBlank()) {
+                        put("query", query)
+                    }
+                    put("customVoice", customVoice)
+                    put("ttsProvider", ttsProvider)
+                    put("preferredLanguage", preferredLanguage)
+                    put("mode", mode)
+                    put("includeAudio", includeAudio)
+
+                    // Only send client history if there is NO active sessionId.
+                    // When sessionId is present, the server ALREADY caches the visual session and prior conversation.
+                    // Sending client history alongside sessionId causes duplicate turns on the server,
+                    // bloating LLM context and degrading response latency after 2+ turns.
+                    if (sessionId.isNullOrBlank() && history.isNotEmpty()) {
+                        val historyArray = org.json.JSONArray()
+                        history.takeLast(6).forEach { turn ->
+                            historyArray.put(JSONObject().apply {
+                                put("role", turn.role)
+                                put("text", turn.text)
+                            })
+                        }
+                        put("history", historyArray)
+                    }
                 }
+
+                val targetUrl = LanguageRouter.resolve(
+                    baseUrl = endpointUrl,
+                    language = preferredLanguage,
+                    path = EndpointPath.SEE_AND_DESCRIBE,
+                    variant = Variant.PLAIN
+                )
+
+                val request = HttpClientProvider.buildJsonPostRequest(targetUrl, jsonPayload)
+                val response = client.newCall(request).execute()
+                val responseBody = response.body?.string()
+
+                if (!response.isSuccessful || responseBody.isNullOrBlank()) {
+                    val errorMsg = "API returned HTTP ${response.code}: ${responseBody?.take(150) ?: "Empty response"}"
+                    return@executeWithRetry Result.failure(HttpException(response.code, errorMsg))
+                }
+
+                val parsed = VisionDescribeResponse.fromJson(responseBody)
+                Result.success(parsed)
+            } catch (e: Exception) {
+                Result.failure(e)
             }
-
-            val mediaType = "application/json; charset=utf-8".toMediaType()
-            val requestBody = jsonPayload.toString().toRequestBody(mediaType)
-
-            val targetUrl = LanguageRouter.resolve(
-                baseUrl = endpointUrl,
-                language = preferredLanguage,
-                path = EndpointPath.SEE_AND_DESCRIBE,
-                variant = Variant.PLAIN
-            )
-
-            val request = Request.Builder()
-                .url(targetUrl)
-                .post(requestBody)
-                .addHeader("Content-Type", "application/json")
-                .addHeader("Accept", "application/json")
-                .build()
-
-            val response = client.newCall(request).execute()
-            val responseBody = response.body?.string()
-
-            if (!response.isSuccessful || responseBody.isNullOrBlank()) {
-                val errorMsg = "API returned HTTP ${response.code}: ${responseBody?.take(150) ?: "Empty response"}"
-                return@withContext Result.failure(IOException(errorMsg))
-            }
-
-            val parsed = VisionDescribeResponse.fromJson(responseBody)
-            Result.success(parsed)
-        } catch (e: Exception) {
-            Result.failure(e)
         }
     }
 
@@ -327,9 +316,6 @@ class VisionApiService(
                 put("includeAudio", includeAudio)
             }
 
-            val mediaType = "application/json; charset=utf-8".toMediaType()
-            val requestBody = jsonPayload.toString().toRequestBody(mediaType)
-
             val targetUrl = LanguageRouter.resolve(
                 baseUrl = endpointUrl,
                 language = preferredLanguage,
@@ -337,19 +323,13 @@ class VisionApiService(
                 variant = Variant.PLAIN
             )
 
-            val request = Request.Builder()
-                .url(targetUrl)
-                .post(requestBody)
-                .addHeader("Content-Type", "application/json")
-                .addHeader("Accept", "application/json")
-                .build()
-
+            val request = HttpClientProvider.buildJsonPostRequest(targetUrl, jsonPayload)
             val response = client.newCall(request).execute()
             val responseBody = response.body?.string()
 
             if (!response.isSuccessful || responseBody.isNullOrBlank()) {
                 val errorMsg = "API returned HTTP ${response.code}: ${responseBody?.take(150) ?: "Empty response"}"
-                return@withContext Result.failure(IOException(errorMsg))
+                return@withContext Result.failure(HttpException(response.code, errorMsg))
             }
 
             val parsed = ReadTextResponse.fromJson(responseBody)
@@ -699,55 +679,48 @@ class VisionApiService(
         preferredLanguage: String = "am",
         includeAudio: Boolean = true
     ): Result<VisionDescribeResponse> = withContext(Dispatchers.IO) {
-        try {
-            val resolvedUrl = LanguageRouter.resolve(
-                baseUrl = endpointUrl,
-                language = preferredLanguage,
-                path = EndpointPath.ASK_QUESTION,
-                variant = Variant.PLAIN
-            )
+        HttpRetryHelper.executeWithRetry {
+            try {
+                val resolvedUrl = LanguageRouter.resolve(
+                    baseUrl = endpointUrl,
+                    language = preferredLanguage,
+                    path = EndpointPath.ASK_QUESTION,
+                    variant = Variant.PLAIN
+                )
 
-            val jsonPayload = JSONObject().apply {
-                if (!sessionId.isNullOrBlank()) {
-                    put("sessionId", sessionId)
+                val jsonPayload = JSONObject().apply {
+                    if (!sessionId.isNullOrBlank()) {
+                        put("sessionId", sessionId)
+                    }
+                    if (!audioBase64.isNullOrBlank()) {
+                        put("audioBase64", audioBase64)
+                    }
+                    if (!query.isNullOrBlank()) {
+                        put("query", query)
+                    }
+                    if (!imageBase64.isNullOrBlank()) {
+                        put("imageBase64", imageBase64)
+                    }
+                    put("customVoice", customVoice)
+                    put("ttsProvider", ttsProvider)
+                    put("preferredLanguage", preferredLanguage)
+                    put("includeAudio", includeAudio)
                 }
-                if (!audioBase64.isNullOrBlank()) {
-                    put("audioBase64", audioBase64)
+
+                val request = HttpClientProvider.buildJsonPostRequest(resolvedUrl, jsonPayload)
+                val response = client.newCall(request).execute()
+                val responseBody = response.body?.string()
+
+                if (!response.isSuccessful || responseBody.isNullOrBlank()) {
+                    val errorMsg = "API returned HTTP ${response.code}: ${responseBody?.take(150) ?: "Empty response"}"
+                    return@executeWithRetry Result.failure(HttpException(response.code, errorMsg))
                 }
-                if (!query.isNullOrBlank()) {
-                    put("query", query)
-                }
-                if (!imageBase64.isNullOrBlank()) {
-                    put("imageBase64", imageBase64)
-                }
-                put("customVoice", customVoice)
-                put("ttsProvider", ttsProvider)
-                put("preferredLanguage", preferredLanguage)
-                put("includeAudio", includeAudio)
+
+                val parsed = VisionDescribeResponse.fromJson(responseBody)
+                Result.success(parsed)
+            } catch (e: Exception) {
+                Result.failure(e)
             }
-
-            val mediaType = "application/json; charset=utf-8".toMediaType()
-            val requestBody = jsonPayload.toString().toRequestBody(mediaType)
-
-            val request = Request.Builder()
-                .url(resolvedUrl)
-                .post(requestBody)
-                .addHeader("Content-Type", "application/json")
-                .addHeader("Accept", "application/json")
-                .build()
-
-            val response = client.newCall(request).execute()
-            val responseBody = response.body?.string()
-
-            if (!response.isSuccessful || responseBody.isNullOrBlank()) {
-                val errorMsg = "API returned HTTP ${response.code}: ${responseBody?.take(150) ?: "Empty response"}"
-                return@withContext Result.failure(IOException(errorMsg))
-            }
-
-            val parsed = VisionDescribeResponse.fromJson(responseBody)
-            Result.success(parsed)
-        } catch (e: Exception) {
-            Result.failure(e)
         }
     }
 
