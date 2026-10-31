@@ -172,6 +172,7 @@ class AddisRealtimeClient(
     }
 
     companion object {
-        val DEFAULT_STREAM_URL: String = BuildConfig.ADDIS_REALTIME_STREAM_URL
+        val DEFAULT_STREAM_URL: String =
+            BuildConfig.API_BASE_URL.trim().trimEnd('/') + "/api/addis-realtime/stream"
     }
 }

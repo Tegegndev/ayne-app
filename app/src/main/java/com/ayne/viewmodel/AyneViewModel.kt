@@ -91,15 +91,15 @@ data class AyneUiState(
         }
 
         val DEFAULT_ENDPOINT: String by lazy {
-            BuildConfig.VISION_API_URL.trim().ifEmpty { buildVisionUrl(DEFAULT_BASE_URL) }
+            buildVisionUrl(DEFAULT_BASE_URL)
         }
 
         val DEFAULT_READ_TEXT_ENDPOINT: String by lazy {
-            BuildConfig.READ_TEXT_API_URL.trim().ifEmpty { buildReadTextUrl(DEFAULT_BASE_URL) }
+            buildReadTextUrl(DEFAULT_BASE_URL)
         }
 
         val DEFAULT_ASK_QUESTION_ENDPOINT: String by lazy {
-            BuildConfig.ASK_QUESTION_API_URL.trim().ifEmpty { buildAskQuestionUrl(DEFAULT_BASE_URL) }
+            buildAskQuestionUrl(DEFAULT_BASE_URL)
         }
     }
 }

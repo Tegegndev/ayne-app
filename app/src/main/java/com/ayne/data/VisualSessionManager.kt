@@ -3,6 +3,8 @@ package com.ayne.data
 import android.graphics.Bitmap
 import android.util.Base64
 import com.ayne.BuildConfig
+import com.ayne.data.endpoints.EndpointPath
+import com.ayne.data.endpoints.LanguageRouter
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
@@ -20,7 +22,8 @@ class VisualSessionManager(
     private val onAudioReceived: (audioBytes: ByteArray, spokenText: String) -> Unit = { _, _ -> },
     private val onError: (String) -> Unit = {}
 ) {
-    var apiUrl: String = BuildConfig.VISION_API_URL
+    var apiUrl: String =
+        LanguageRouter.resolve(BuildConfig.API_BASE_URL, "en", EndpointPath.SEE_AND_DESCRIBE)
 
     // Server-cached visual session ID for zero-upload follow-up turns
     var activeSessionId: String? = null
