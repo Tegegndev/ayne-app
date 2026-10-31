@@ -57,7 +57,10 @@
     <string name="permission_dialog_title">Permission Required</string>
     <string name="permission_dialog_open_settings">Open Settings</string>
     <string name="permission_dialog_dismiss">Dismiss</string>
-    
+
+    <!-- First-launch language picker (spoken announcement uses device TTS in English) -->
+    <string name="language_picker_announcement">Welcome to Ayne! Choose the language you want to use. Tap the first button for Amharic. Tap the middle button for Afaan Oromoo. Or tap the last button for English.</string>
+
     <!-- Settings Dialog -->
     <string name="settings_button_desc">API endpoint settings</string>
     <string name="settings_dialog_title">Mirkuz Vision API Endpoints</string>
