@@ -52,7 +52,7 @@
     <string name="permission_dialog_dismiss">ዝጋ</string>
     
     <string name="settings_button_desc">የኤፒአይ ማስተካከያ</string>
-    <string name="settings_dialog_title">የምርኩዝ ቪዥን ኤፒአይ አድራሻዎች</string>
+    <string name="settings_dialog_title">የአይኔ ኤፒአይ አድራሻዎች</string>
     <string name="settings_dialog_subtitle">ከአካባቢ ተለዋዋጮች የተዋቀሩ ኤፒአይዎች፦</string>
     <string name="vision_endpoint_label">ዙሪያውን የማስረዳት ኤፒአይ</string>
     <string name="read_text_endpoint_label">ጽሑፍ የማንበብ ኤፒአይ</string>

@@ -14,7 +14,7 @@ This document describes how Ayne is put together, why the pieces are shaped the 
 │         │                    │
 │    AyneViewModel             │
 │         │                    │
-│  MirkuzVisionRepository ─────┼──┐
+│  VisionRepository ──────────┼──┐
 │         │                    │  │  HTTPS + SSE
 │  VisionApiService            │  │
 │  VisualSessionManager        │  │
@@ -61,7 +61,7 @@ This document describes how Ayne is put together, why the pieces are shaped the 
 ### 2.2 Read text (streaming, SSE)
 
 1. Frame captured as above.
-2. `MirkuzVisionRepository.readTextStream()` opens `POST /api/read-text/stream` with `Accept: text/event-stream`.
+2. `VisionRepository.readTextStream()` opens `POST /api/read-text/stream` with `Accept: text/event-stream`.
 3. Backend emits, in order:
    - `event: ocr` — extracted text, so the app can show it while audio is still generating
    - `event: audio_chunk` — base64 audio fragments
@@ -155,18 +155,15 @@ This is why the app treats capture as an event, not a stream.
 
 ## 8. Known limitations
 
-1. The API path-rewriting logic is duplicated in three places (see §3).
-2. `MainActivity.kt` carries the ViewModel, UI state and every composable in one file — extraction into `ui/` and `viewmodel/` packages is the next structural step.
-3. Several audio-path exceptions are swallowed by empty `catch` blocks, which can leave the user without feedback.
-4. Temporary MP3 files accumulate until the system reclaims them.
-5. No retry or offline path: a single failed request ends the interaction.
-6. The realtime voice client and the streaming vision client are independent; unifying them under one session abstraction would simplify state handling.
+1. The realtime voice client and the streaming vision client are independent; unifying them under one session abstraction would simplify state handling.
+2. Offline STT/TTS fallback on device is not yet present; network connectivity is required for Amharic and Afaan Oromo synthesis.
+
+*(Note: Prior limitations regarding path rewriting, monolithic MainActivity, silent catches, temp audio accumulation, lack of retry, and duplicate HTTP clients have been resolved in the refactor).*
 
 ---
 
 ## 9. Future work
 
-- **Refactor:** extract endpoints into `LanguageRouter`, split `MainActivity`, replace silent catches with spoken error surface, delete temp files after playback, add retry with backoff.
 - **Offline STT:** fine-tune Whisper on Afrivoice Ethiopia (CC BY 4.0) and run it on device via whisper.cpp, removing the STT network dependency.
 - **Location context:** GPS + reverse geocoding for "where am I" and to ground AI answers in the user's area.
 - **Additional languages:** Sidama, Tigrinya, Wolaytta.
@@ -178,13 +175,21 @@ This is why the app treats capture as an event, not a stream.
 
 | Path | Responsibility |
 | --- | --- |
-| `MainActivity.kt` | Compose entry point, screen composition, app-level state holder |
-| `data/VisionApiService.kt` | HTTP + SSE calls to describe/stream endpoints |
-| `data/MirkuzVisionRepository.kt` | Session-aware orchestration, audio playback, temp files |
+| `MainActivity.kt` | Edge-to-edge entry point, setContent, volume key routing |
+| `viewmodel/AyneViewModel.kt` | Screen state machine, action dispatcher, audio orchestration |
+| `ui/MainScreen.kt` | Scaffold, camera preview, high-contrast action cards |
+| `ui/components/` | Top bar, bottom bar, action cards, companion panel, settings |
+| `data/VisionApiService.kt` | HTTP client: describe (single pass) + SSE streaming |
+| `data/VisionRepository.kt` | Session-aware orchestration, audio playback, temp files |
+| `data/network/VisionNetworkManager.kt` | Streaming vision client and visual session management |
+| `data/endpoints/LanguageRouter.kt` | Pure language and endpoint resolution |
+| `data/HttpClientProvider.kt` | Shared OkHttpClient and request builder |
+| `data/HttpRetryHelper.kt` | Exponential backoff retry for network and 5xx errors |
 | `data/VisualSessionManager.kt` | Visual session lifecycle and follow-up routing |
 | `data/AddisRealtimeClient.kt`, `AddisRealtimeSse.kt` | Addis AI realtime voice transport and parsing |
 | `data/VisionModels.kt` | Request/response data models |
-| `ui/` | Ask Question screen, language screens, theme |
+| `domain/CompanionFallback.kt` | Rule-based fallback answers when backend is unreachable |
+| `util/TempAudioStore.kt` | Cache-dir audio file lifecycle and size capping |
 | `util/` | Camera capture, voice recording, playback, PCM decoding, feedback cues |
 | `app/src/test/` | Unit and Robolectric tests |
 

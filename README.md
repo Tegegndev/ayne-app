@@ -97,23 +97,43 @@ The app never talks to Gemini or Addis AI directly: all provider keys live on th
 ## Repository layout
 
 ```
-app/src/main/java/com/example/
-├── MainActivity.kt              Compose entry point, screen and theme wiring
+app/src/main/java/com/ayne/
+├── MainActivity.kt                  Edge-to-edge entry point and hardware key routing
+├── viewmodel/
+│   └── AyneViewModel.kt             UiState machine, user intent handling, audio playback
+├── domain/
+│   └── CompanionFallback.kt         Offline rule-based fallback responses
 ├── data/
-│   ├── VisionApiService.kt      HTTP client: describe (single pass) + SSE streaming
-│   ├── MirkuzVisionRepository.kt Session-aware repository, audio playback, temp-file handling
-│   ├── VisualSessionManager.kt  Visual session lifecycle and follow-up routing
-│   ├── AddisRealtimeClient.kt   Addis AI realtime voice client
-│   ├── AddisRealtimeSse.kt      Realtime event parsing
-│   └── VisionModels.kt          Request/response models
+│   ├── VisionApiService.kt          HTTP client: describe (single pass) + SSE streaming
+│   ├── VisionRepository.kt          Session-aware repository, audio playback, temp files
+│   ├── HttpClientProvider.kt        Shared OkHttpClient instance and request factory
+│   ├── HttpRetryHelper.kt           Network and 5xx retry with exponential backoff
+│   ├── VisualSessionManager.kt      Visual session lifecycle and follow-up routing
+│   ├── AddisRealtimeClient.kt       Addis AI realtime voice client
+│   ├── AddisRealtimeSse.kt          Realtime event parsing
+│   ├── VisionModels.kt              Request/response models
+│   ├── endpoints/
+│   │   └── LanguageRouter.kt        Pure language and endpoint URL resolution
+│   └── network/
+│       └── VisionNetworkManager.kt  Streaming vision network client
 ├── ui/
-│   ├── VoiceAskScreen.kt        Ask Question screen
-│   ├── MockLanguageScreens.kt   Language selection
-│   └── theme/                   Colour, typography, Material theme
+│   ├── MainScreen.kt                Primary camera screen & action layout
+│   ├── VoiceAskScreen.kt            Ask Question screen
+│   ├── MockLanguageScreens.kt       Language selection previews
+│   ├── components/
+│   │   ├── AyneTopBar.kt            Top bar and language picker dialog
+│   │   ├── AyneBottomBar.kt         Bottom controls (repeat answer)
+│   │   ├── AyneActionCards.kt       High-contrast action cards
+│   │   ├── AskQuestionPanel.kt      Ask question visual panel
+│   │   ├── CompanionPanel.kt        Companion conversation panel
+│   │   └── VisionSettingsDialog.kt  Endpoint configuration dialog
+│   └── theme/                       Colour, typography, Material theme
 └── util/
     ├── CameraCaptureHelper.kt       Frame capture and JPEG compression
     ├── VoiceRecorderHelper.kt       Microphone capture
-    ├── AudioPlaybackHelper.kt       PCM/MP3 playback
+    ├── AudioPlaybackHelper.kt       PCM/MP3 chunk playback
+    ├── TempAudioStore.kt            Lifecycle-managed temp audio file storage
+    ├── VolumeKeyHandler.kt          Hardware volume button interaction
     ├── Pcm16Decoder.kt              16-bit PCM decoding for realtime audio
     └── ProcessingFeedbackHelper.kt  Haptics and spoken status cues
 ```
