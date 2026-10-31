@@ -1,5 +1,7 @@
 # Ayne (አይን)
 
+[![Release](https://github.com/Tegegndev/ayne-app/actions/workflows/release.yml/badge.svg)](https://github.com/Tegegndev/ayne-app/actions/workflows/release.yml)
+
 **A voice-first AI visual assistant for blind and low-vision people in Ethiopia.**
 
 Ayne turns a phone camera into a pair of eyes. Point it at the world, ask in Amharic or Afaan Oromo, and hear the answer spoken back — no screen reading required.
@@ -17,6 +19,7 @@ Built as the graduation capstone for the 5th round INSA Summer Camp, Software De
 - [Tech stack](#tech-stack)
 - [Repository layout](#repository-layout)
 - [Getting started](#getting-started)
+- [Releases](#releases)
 - [Accessibility design](#accessibility-design)
 - [Testing](#testing)
 - [Roadmap](#roadmap)
@@ -69,8 +72,6 @@ Three deliberate design decisions follow from Ethiopian realities:
 
 ## Architecture
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the full breakdown: request flows, SSE event contracts, language routing, latency budget, security model and scaling notes.
-
 At a glance:
 
 ```
@@ -84,11 +85,21 @@ At a glance:
 └─────────────────────────┘                           └──────────────────────┘
 ```
 
-The app never talks to Gemini or Addis AI directly: all provider keys live on the server. The client only knows the backend base URL, which is supplied at build time.
+The app is a **thin client**. It never talks to Gemini or Addis AI directly, holds no provider credentials, and carries no prompt logic beyond a base URL supplied at build time. All secrets and provider routing live on the server, so a decompiled APK leaks nothing usable and prompt changes ship without an app release.
+
+**Streaming contract.** Streaming endpoints respond with Server-Sent Events in a fixed order: `event: ocr` (extracted text first), then `event: audio_chunk` fragments, then `event: done` or `event: error`. Playback starts on the first chunk, and current speech is stopped before every new request so answers never overlap.
+
+**Session caching.** Turn 1 sends `imageBase64` and receives a `sessionId`. Follow-up turns send only the session id — no image — and the backend answers against the cached visual context.
+
+**Language routing.** Each endpoint exists in language variants (e.g. `/api/see-and-describe/am`, `/api/read-text/om/stream`). The client derives the variant from the configured base URL plus the selected language.
+
+**Latency budget.** Target: first spoken word within ~3 seconds of the user finishing their question. Frame capture + JPEG encode 150–400 ms, upload 200–900 ms, Gemini inference 0.8–2 s, first TTS chunk 300–700 ms.
+
+**Data cost.** One describe request ≈ 180 KB up / 60–120 KB down; a follow-up ≈ 30 KB up (no image). Continuous video streaming would cost several MB per minute, which is why capture is an event, not a stream.
 
 ## Tech stack
 
-**Android app** — Kotlin, Jetpack Compose (Material 3), CameraX, OkHttp + OkHttp SSE, MediaRecorder, MediaPlayer, `Pcm16Decoder`, Coroutines, Jetpack ViewModel. `minSdk 24`, `targetSdk 36`.
+**Android app** — Kotlin, Jetpack Compose (Material 3), CameraX, OkHttp + OkHttp SSE, MediaRecorder, MediaPlayer, `Pcm16Decoder`, Coroutines, Jetpack ViewModel, Firebase (App Check for client attestation). `minSdk 24`, `targetSdk 36`.
 
 **Backend** — Vercel serverless functions: `/api/see-and-describe`, `/api/see-and-describe/stream`, `/api/read-text/stream`, `/api/ask-question` (plus `am` / `om` routing variants).
 
@@ -132,9 +143,11 @@ app/src/main/java/com/ayne/
     ├── CameraCaptureHelper.kt       Frame capture and JPEG compression
     ├── VoiceRecorderHelper.kt       Microphone capture
     ├── AudioPlaybackHelper.kt       PCM/MP3 chunk playback
+    ├── Mp3FrameAligner.kt           MP3 frame-boundary splitting for glitch-free chunk playback
     ├── TempAudioStore.kt            Lifecycle-managed temp audio file storage
     ├── VolumeKeyHandler.kt          Hardware volume button interaction
     ├── Pcm16Decoder.kt              16-bit PCM decoding for realtime audio
+    ├── PermissionPromptSpeaker.kt   Speaks permission request prompts aloud
     └── ProcessingFeedbackHelper.kt  Haptics and spoken status cues
 ```
 
@@ -170,6 +183,22 @@ The APK lands in `app/build/outputs/apk/debug/`.
 ### Permissions
 
 The app requests camera and microphone access on first use. Both are required. No account, no sign-in, and no personal data leaves the device other than the frame and audio needed to answer the user's question.
+
+## Releases
+
+Prebuilt, signed APKs are published automatically to [GitHub Releases](https://github.com/Tegegndev/ayne-app/releases) — no Android Studio required to install the app.
+
+To cut a release, use the helper script (bumps the version, commits and tags):
+
+```bash
+./scripts/release.sh 1.0.1 --push
+```
+
+Or tag manually. Pushing a `v*` tag triggers the [Build & Publish Release workflow](.github/workflows/release.yml), which builds the signed APK and attaches it to the GitHub Release:
+
+```bash
+git tag v1.0.1 && git push origin v1.0.1
+```
 
 ## Accessibility design
 
