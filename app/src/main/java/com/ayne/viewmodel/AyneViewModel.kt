@@ -87,52 +87,19 @@ data class AyneUiState(
             LanguageRouter.resolve(base, language ?: "en", EndpointPath.ASK_QUESTION, Variant.PLAIN)
 
         val DEFAULT_BASE_URL: String by lazy {
-            try {
-                val url = BuildConfig.API_BASE_URL
-                if (!url.isNullOrBlank()) url.trim().trimEnd('/')
-                else "https://ayne-roan.vercel.app"
-            } catch (e: Throwable) {
-                "https://ayne-roan.vercel.app"
-            }
+            BuildConfig.API_BASE_URL.trim().trimEnd('/')
         }
 
         val DEFAULT_ENDPOINT: String by lazy {
-            try {
-                val custom = BuildConfig.VISION_API_URL
-                if (!custom.isNullOrBlank() && !custom.contains("foul-crematorium")) {
-                    custom.trim()
-                } else {
-                    buildVisionUrl(DEFAULT_BASE_URL)
-                }
-            } catch (e: Throwable) {
-                buildVisionUrl(DEFAULT_BASE_URL)
-            }
+            BuildConfig.VISION_API_URL.trim().ifEmpty { buildVisionUrl(DEFAULT_BASE_URL) }
         }
 
         val DEFAULT_READ_TEXT_ENDPOINT: String by lazy {
-            try {
-                val custom = BuildConfig.READ_TEXT_API_URL
-                if (!custom.isNullOrBlank() && !custom.contains("foul-crematorium")) {
-                    custom.trim()
-                } else {
-                    buildReadTextUrl(DEFAULT_BASE_URL)
-                }
-            } catch (e: Throwable) {
-                buildReadTextUrl(DEFAULT_BASE_URL)
-            }
+            BuildConfig.READ_TEXT_API_URL.trim().ifEmpty { buildReadTextUrl(DEFAULT_BASE_URL) }
         }
 
         val DEFAULT_ASK_QUESTION_ENDPOINT: String by lazy {
-            try {
-                val custom = BuildConfig.ASK_QUESTION_API_URL
-                if (!custom.isNullOrBlank() && !custom.contains("foul-crematorium")) {
-                    custom.trim()
-                } else {
-                    buildAskQuestionUrl(DEFAULT_BASE_URL)
-                }
-            } catch (e: Throwable) {
-                buildAskQuestionUrl(DEFAULT_BASE_URL)
-            }
+            BuildConfig.ASK_QUESTION_API_URL.trim().ifEmpty { buildAskQuestionUrl(DEFAULT_BASE_URL) }
         }
     }
 }

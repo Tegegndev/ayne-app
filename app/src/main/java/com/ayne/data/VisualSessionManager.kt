@@ -2,6 +2,7 @@ package com.ayne.data
 
 import android.graphics.Bitmap
 import android.util.Base64
+import com.ayne.BuildConfig
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
@@ -19,7 +20,7 @@ class VisualSessionManager(
     private val onAudioReceived: (audioBytes: ByteArray, spokenText: String) -> Unit = { _, _ -> },
     private val onError: (String) -> Unit = {}
 ) {
-    var apiUrl: String = "https://ayne-roan.vercel.app/api/see-and-describe"
+    var apiUrl: String = BuildConfig.VISION_API_URL
 
     // Server-cached visual session ID for zero-upload follow-up turns
     var activeSessionId: String? = null

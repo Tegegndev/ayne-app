@@ -2,6 +2,7 @@ package com.ayne.data
 
 import android.media.AudioAttributes
 import android.util.Base64
+import com.ayne.BuildConfig
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
@@ -171,6 +172,6 @@ class AddisRealtimeClient(
     }
 
     companion object {
-        val DEFAULT_STREAM_URL = "https://ayne-roan.vercel.app/api/addis-realtime/stream"
+        val DEFAULT_STREAM_URL: String = BuildConfig.ADDIS_REALTIME_STREAM_URL
     }
 }

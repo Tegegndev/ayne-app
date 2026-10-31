@@ -71,7 +71,7 @@ class AskQuestionStreamTest {
     fun testAskQuestionEndpointDerivation() {
         val state = AyneUiState()
         assertNotNull(state.baseUrl)
-        assertTrue(state.baseUrl.contains("https://ayne-roan.vercel.app"))
+        assertTrue(state.baseUrl.startsWith("http"))
         assertNotNull(state.askQuestionEndpoint)
         assertTrue(state.askQuestionEndpoint.contains("ask-question"))
         assertTrue(state.apiEndpoint.contains("see-and-describe"))
