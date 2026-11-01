@@ -132,6 +132,8 @@ import com.ayne.ui.components.AyneBottomControls
 import com.ayne.ui.components.AyneCompanionPanel
 import com.ayne.ui.components.AyneTopBar
 import com.ayne.ui.components.FirstLaunchLanguagePickerDialog
+import com.ayne.ui.components.HowToUseGuideDialog
+import com.ayne.ui.components.howToUseScriptFor
 import com.ayne.ui.components.LanguageSelector
 import com.ayne.ui.components.VisionSettingsDialog
 import com.ayne.ui.theme.AyneDarkCard
@@ -224,11 +226,14 @@ fun AyneAppScreen(
     var pendingPermissionDialog by remember { mutableStateOf<String?>(null) }
     var pendingPermissionMessage by remember { mutableStateOf("") }
     var showFirstLaunchPicker by rememberSaveable { mutableStateOf(false) }
+    // How-to-use guide: auto-shown once on first launch (after the language
+    // picker) and re-openable from the top-bar help button at any time.
+    var showHowToUse by rememberSaveable { mutableStateOf(false) }
     // True once the first-launch picker has been resolved (pick or defer). The
     // home content stays hidden until then so the homepage never flashes
     // behind the startup dialogs on a brand-new install.
     var firstLaunchResolved by rememberSaveable { mutableStateOf(false) }
-    val firstLaunchPending = uiState.isFirstLaunch && !firstLaunchResolved
+    val firstLaunchPending = (uiState.isFirstLaunch && !firstLaunchResolved) || showHowToUse
 
     // Launch-time permission flow: scheduled continuation of the request that is
     // currently waiting for its system dialog result (null when no launch flow is active).
@@ -337,6 +342,12 @@ fun AyneAppScreen(
             // Wait until the user picks a language (closing happens on pick,
             // back-press defers the choice and re-opens the picker next launch).
             snapshotFlow { showFirstLaunchPicker }.first { it == false }
+
+            // How-to-use guide before the permission dialogs: explains the three
+            // actions and the volume keys, and warns that permission requests
+            // are next. Playback starts in the LaunchedEffect(showHowToUse).
+            showHowToUse = true
+            snapshotFlow { showHowToUse }.first { it == false }
         }
 
         val hasCamera = ContextCompat.checkSelfPermission(
@@ -383,6 +394,22 @@ fun AyneAppScreen(
                     micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                 }
             }
+        }
+    }
+
+    /**
+     * How-to-use guide audio: plays whenever the guide opens — automatically
+     * on first launch, or when the user taps the top-bar help button. The
+     * backend-recorded clip is used when cached; otherwise device TTS reads
+     * the same script in the selected language.
+     */
+    LaunchedEffect(showHowToUse) {
+        if (showHowToUse) {
+            permissionPromptSpeaker.playGuide(
+                howToUseScriptFor(uiState.selectedLanguage),
+                uiState.selectedLanguage.code,
+                uiState.baseUrl
+            )
         }
     }
 
@@ -567,6 +594,7 @@ fun AyneAppScreen(
                             viewModel.onAction(context, AyneAction.FlipCamera)
                         },
                         onSettingsClick = { showSettingsDialog = true },
+                        onHelpClick = { showHowToUse = true },
                         modifier = Modifier.padding(innerPadding)
                     )
                 }
@@ -584,6 +612,7 @@ fun AyneAppScreen(
                             viewModel.onAction(context, AyneAction.FlipCamera)
                         },
                         onSettingsClick = { showSettingsDialog = true },
+                        onHelpClick = { showHowToUse = true },
                         modifier = Modifier.padding(innerPadding)
                     )
                 }
@@ -599,6 +628,7 @@ fun AyneAppScreen(
                             viewModel.onAction(context, AyneAction.FlipCamera)
                         },
                         onSettingsClick = { showSettingsDialog = true },
+                        onHelpClick = { showHowToUse = true },
                         modifier = Modifier.padding(innerPadding)
                     )
                 }
@@ -712,6 +742,25 @@ fun AyneAppScreen(
                 }
             )
         }
+
+        if (showHowToUse) {
+            HowToUseGuideDialog(
+                script = howToUseScriptFor(uiState.selectedLanguage),
+                onNext = {
+                    // Stop the narration mid-sentence: the user acted on the guide.
+                    permissionPromptSpeaker.stop()
+                    showHowToUse = false
+                },
+                onReplay = {
+                    permissionPromptSpeaker.stop()
+                    permissionPromptSpeaker.playGuide(
+                        howToUseScriptFor(uiState.selectedLanguage),
+                        uiState.selectedLanguage.code,
+                        uiState.baseUrl
+                    )
+                }
+            )
+        }
     }
 }
 
@@ -728,6 +777,7 @@ fun AyneScreenContent(
     onAskQuestionClick: () -> Unit,
     onFlipCamera: () -> Unit,
     onSettingsClick: () -> Unit,
+    onHelpClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val scrollState = rememberScrollState()
@@ -750,7 +800,8 @@ fun AyneScreenContent(
                 onAction(AyneAction.SelectLanguage(it))
             },
             onFlipCamera = onFlipCamera,
-            onSettingsClick = onSettingsClick
+            onSettingsClick = onSettingsClick,
+            onHelpClick = onHelpClick
         )
 
         Spacer(modifier = Modifier.height(12.dp))

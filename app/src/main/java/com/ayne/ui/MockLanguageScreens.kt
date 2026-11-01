@@ -60,6 +60,7 @@ fun EnglishMockScreen(
     onLanguageSelected: (SupportedLanguage) -> Unit = {},
     onFlipCamera: () -> Unit = {},
     onSettingsClick: () -> Unit = {},
+    onHelpClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val haptic = LocalHapticFeedback.current
@@ -80,7 +81,8 @@ fun EnglishMockScreen(
                 isFrontCamera = uiState.isFrontCamera,
                 onLanguageSelected = onLanguageSelected,
                 onFlipCamera = onFlipCamera,
-                onSettingsClick = onSettingsClick
+                onSettingsClick = onSettingsClick,
+                onHelpClick = onHelpClick
             )
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -508,6 +510,7 @@ fun AfaanOromooMockScreen(
     onLanguageSelected: (SupportedLanguage) -> Unit = {},
     onFlipCamera: () -> Unit = {},
     onSettingsClick: () -> Unit = {},
+    onHelpClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val haptic = LocalHapticFeedback.current
@@ -528,7 +531,8 @@ fun AfaanOromooMockScreen(
                 isFrontCamera = uiState.isFrontCamera,
                 onLanguageSelected = onLanguageSelected,
                 onFlipCamera = onFlipCamera,
-                onSettingsClick = onSettingsClick
+                onSettingsClick = onSettingsClick,
+                onHelpClick = onHelpClick
             )
 
             Spacer(modifier = Modifier.height(12.dp))

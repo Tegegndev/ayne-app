@@ -65,7 +65,7 @@ class PermissionPromptSpeaker(context: Context) {
                         val clip = manifestClips.optJSONObject(i) ?: continue
                         val language = clip.optString("language")
                         val message = clip.optString("message")
-                        if (language !in setOf("en", "am", "om") || message !in setOf("camera", "microphone") ||
+                        if (language !in setOf("en", "am", "om") || message !in SUPPORTED_MESSAGES ||
                             language !in languages || message !in messages
                         ) continue
                         val id = "$language/$message"
@@ -149,6 +149,15 @@ class PermissionPromptSpeaker(context: Context) {
         }
     }
 
+    /**
+     * Plays the how-to-use guide: the backend-generated narration clip when
+     * cached (custom recorded voice), otherwise device TTS reading the same
+     * script. Nothing follows playback — the caller decides when to stop.
+     */
+    fun playGuide(text: String, languageCode: String, baseUrl: String) {
+        speakThen(text, languageCode, MESSAGE_GUIDE, baseUrl) { }
+    }
+
     private fun playClip(file: File, fallbackText: String, languageCode: String, onDone: () -> Unit) {
         val completed = AtomicBoolean(false)
         fun finish() {
@@ -156,6 +165,9 @@ class PermissionPromptSpeaker(context: Context) {
         }
         runCatching {
             stopAudio()
+            // A clip must never mix with a still-speaking TTS utterance
+            // (e.g. the language confirmation right before the guide opens).
+            runCatching { tts?.stop() }
             mediaPlayer = MediaPlayer().apply {
                 setAudioAttributes(
                     AudioAttributes.Builder()
@@ -242,5 +254,9 @@ class PermissionPromptSpeaker(context: Context) {
 
     private companion object {
         const val TAG = "PermissionPromptAudio"
+
+        /** Manifest message keys this player accepts; the how-to-use guide narration. */
+        val SUPPORTED_MESSAGES = setOf("camera", "microphone", MESSAGE_GUIDE)
+        const val MESSAGE_GUIDE = "how_to_use"
     }
 }

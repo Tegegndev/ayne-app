@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
 import androidx.compose.material.icons.filled.Cameraswitch
+import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -63,10 +64,12 @@ fun AyneTopBar(
     onLanguageSelected: (SupportedLanguage) -> Unit,
     onFlipCamera: () -> Unit,
     onSettingsClick: () -> Unit,
+    onHelpClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val logoDesc = stringResource(R.string.logo_desc)
     val settingsDesc = stringResource(R.string.settings_button_desc)
+    val helpDesc = stringResource(R.string.how_to_use_button_desc)
     val cameraSideName = if (isFrontCamera) {
         stringResource(R.string.camera_front)
     } else {
@@ -121,8 +124,23 @@ fun AyneTopBar(
             onLanguageSelected = onLanguageSelected
         )
 
-        // Right side: Camera Flip & Settings buttons
+        // Right side: Help, Camera Flip & Settings buttons
         Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(
+                onClick = onHelpClick,
+                modifier = Modifier
+                    .size(44.dp)
+                    .semantics { contentDescription = helpDesc }
+                    .testTag("how_to_use_button")
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.HelpOutline,
+                    contentDescription = null,
+                    tint = AyneVibrantYellow,
+                    modifier = Modifier.size(26.dp)
+                )
+            }
+
             val flipDesc = stringResource(R.string.flip_camera_desc, cameraSideName)
             IconButton(
                 onClick = onFlipCamera,

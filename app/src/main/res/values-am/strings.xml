@@ -81,4 +81,11 @@
     <string name="clear_scene_button">አዲስ ምስል</string>
     <string name="clear_scene_desc">የተያዘውን ምስልና የውይይት ታሪክ ያጽዱ</string>
     <string name="analyzing_followup">በተያዘው ምስል ላይ የቀረበውን ተከታይ ጥያቄ እያጠና ነው…</string>
+
+    <!-- How-to-Use Guide -->
+    <string name="how_to_use_button_desc">አገልግሎት መመሪያ። አይኔ እንዴት እንደሚሠራ ለመስማት ይንኩ።</string>
+    <string name="how_to_use_title">አይኔን እንዴት እንደሚጠቀሙ</string>
+    <string name="how_to_use_next">ቀጥል</string>
+    <string name="how_to_use_next_desc">ቀጥል። መመሪያውን ጨርሶ ለመቀጠል ይንኩ።</string>
+    <string name="how_to_use_replay_desc">እንደገና አጫውት። መመሪያውን ከመጀመሪያው ለመስማት ይንኩ።</string>
 </resources>

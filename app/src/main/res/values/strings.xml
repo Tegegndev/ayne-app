@@ -64,6 +64,13 @@
     <!-- First-launch language picker (spoken announcement uses device TTS in English) -->
     <string name="language_picker_announcement">Welcome to Ayne! Choose the language you want to use. Tap the first button for Amharic. Tap the middle button for Afaan Oromoo. Or tap the last button for English.</string>
 
+    <!-- How-to-Use Guide (script subtitle text is chosen in Kotlin per language: no values-om folder) -->
+    <string name="how_to_use_button_desc">How to use guide. Double tap to hear how Ayne works.</string>
+    <string name="how_to_use_title">How to use Ayne</string>
+    <string name="how_to_use_next">Next</string>
+    <string name="how_to_use_next_desc">Next. Double tap to finish the guide and continue.</string>
+    <string name="how_to_use_replay_desc">Replay guide. Double tap to hear the guide from the beginning.</string>
+
     <!-- Settings Dialog -->
     <string name="settings_button_desc">API endpoint settings</string>
     <string name="settings_dialog_title">Ayne API Endpoints</string>
