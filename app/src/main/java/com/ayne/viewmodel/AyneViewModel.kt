@@ -642,8 +642,9 @@ class AyneViewModel(
      * Realtime Mode B voice turn: decodes the recorded clip to 16 kHz mono
      * PCM16, POSTs it to /api/addis-realtime/stream, accumulates the streamed
      * MP3 speech, and plays it when the turn completes. Recent conversation
-     * turns ride along in systemPrompt so follow-ups keep their context.
-     * Any failure falls back to the session-based ask-question endpoint.
+     * turns ride along as a structured `history` array so follow-ups keep
+     * their context. Any failure falls back to the session-based
+     * ask-question endpoint.
      */
     private fun startRealtimeTurn(context: Context, voiceBase64: String) {
         val language = _uiState.value.selectedLanguage.code
@@ -654,13 +655,7 @@ class AyneViewModel(
         val historyTurns = _uiState.value.askQuestionHistory.ifEmpty {
             _uiState.value.conversationHistory
         }
-        val recentHistory = historyTurns.takeLast(6)
-        val systemPrompt = if (recentHistory.isEmpty()) {
-            null
-        } else {
-            "Previous conversation turns, oldest first. Continue naturally as the assistant:\n" +
-                recentHistory.joinToString("\n") { "${it.role}: ${it.text}" }
-        }
+        val recentHistory = historyTurns.takeLast(6).ifEmpty { null }
 
         _uiState.update { it.copy(isBusy = true, liveTranscription = null) } // orb → Thinking
 
@@ -756,7 +751,7 @@ class AyneViewModel(
                 audioBase64 = audioBase64,
                 language = language,
                 voice = voice,
-                systemPrompt = systemPrompt,
+                history = recentHistory,
                 image = freshFrame
             )
         }

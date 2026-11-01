@@ -20,9 +20,10 @@ import java.util.concurrent.atomic.AtomicBoolean
  * one HTTP POST with the user's question (audio or text) and a
  * Server-Sent Events response streaming transcripts and MP3 speech chunks.
  *
- * Contract (verified in production 2026-10-30):
+ * Contract (verified in production 2026-10-30; history/image support 2026-11-01):
  *   request : {"audio": <base64 PCM16 16kHz mono> | "text": "...", "language": "am"|"om",
- *              "voice": "am-hamen"|"om-abdi", "systemPrompt": optional context}
+ *              "voice": "am-hamen"|"om-abdi", "history": [{"role","text"}...],
+ *              "image": <base64 JPEG>}
  *   stream  : ready → transcript(user) → transcript(assistant) → audio* → turn_complete → done
  *   barge-in: cancel the HTTP request ([cancel]); the server aborts upstream work on close.
  */
@@ -67,12 +68,16 @@ class AddisRealtimeClient(
     /**
      * Starts a voice turn. Safe to call from any thread; callbacks arrive on
      * an OkHttp worker thread — hop to the main thread for UI work.
+     *
+     * [history] carries recent conversation turns (oldest first) so follow-ups
+     * keep their context; the server prepends them to the LLM prompt and
+     * normalizes "assistant" roles to "model".
      */
     fun sendVoiceTurn(
         audioBase64: String,
         language: String,
         voice: String? = null,
-        systemPrompt: String? = null,
+        history: List<ConversationTurn>? = null,
         image: String? = null
     ) {
         cancel() // any in-flight turn is dead the moment a new one starts
@@ -82,9 +87,17 @@ class AddisRealtimeClient(
             put("audio", audioBase64)
             put("language", language)
             if (!voice.isNullOrBlank()) put("voice", voice)
-            if (!systemPrompt.isNullOrBlank()) put("systemPrompt", systemPrompt)
-            // Current camera frame so visual questions have context. Ignored
-            // by servers that don't accept it yet; used once they do.
+            if (!history.isNullOrEmpty()) {
+                put("history", org.json.JSONArray().apply {
+                    history.forEach { turn ->
+                        put(JSONObject().apply {
+                            put("role", turn.role)
+                            put("text", turn.text)
+                        })
+                    }
+                })
+            }
+            // Current camera frame so visual questions have context.
             if (!image.isNullOrBlank()) put("image", image)
         }
         val request = Request.Builder()
