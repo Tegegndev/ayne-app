@@ -20,7 +20,8 @@ it through the existing permission-guidance manifest.
 - Pause **~700 ms between the numbered sections** below and ~300–400 ms at
   sentence breaks inside a section.
 - Feature names must be spoken **exactly as written** — they match the on-screen
-  buttons the user will look for: ዙሪያውን አስረዳ / ጽሑፍ አንብብ / ጠይቅ.
+  buttons the user will look for: ዙሪያውን አስረዳ / ጽሑፍ አንብብ / Read Text (English
+  as written), and "Next" in section 7.
 - The volume-key sentence is an instruction the user will physically act on:
   make የድምፅ መጨመሪያ (volume **up**) vs የድምፅ መቀነሻ (volume **down**) clearly
   distinguishable.
@@ -62,34 +63,107 @@ Next ስትጫኑ አይኔ የካሜራና የማይክሮፎን ፈቃድ ይ�
 | --- | --- |
 | Format | MP3 (MPEG-1 Layer III), CBR |
 | Bitrate / channels | 64–96 kbps, **mono**, 44.1 kHz |
-| Content-Type | **`audio/mpeg`** exactly (charset suffix like `; charset=binary` is tolerated) |
 | Duration | 60–90 s, moderate constant loudness, no clipping |
 | Checksum | sha256 **of the exact served bytes**, 64 hex chars |
 
-The app rejects the download if the content type differs or the checksum
-mismatchs — it will silently fall back to device TTS, which defeats the purpose.
+## Technical integration
 
-## Manifest changes (`/api/v1/audio/permission-guidance/manifest`)
+### How the app consumes this (pipeline)
 
-1. Add `"how_to_use"` to `supportedMessages`.
-2. Add the clip entry (same shape as the camera/microphone clips):
+1. On app launch (and before every guide playback if the clip is missing), the
+   app calls the **manifest endpoint** and parses it.
+2. For every clip entry it understands (`am/how_to_use` etc.), it checks its
+   local cache (`app files/permission-guidance/`). Cache filenames embed the
+   manifest `version` + `sha256`, so a changed clip is re-downloaded
+   automatically.
+3. Uncached clips are downloaded from the clip **endpoint** in the background.
+4. When the guide plays: cached clip → `MediaPlayer`. Missing/failed clip →
+   device TTS reads the script. **All download failures are silent** — the user
+   never sees an error, they just hear the lower-quality TTS voice. That is why
+   the contract below must be followed exactly.
+
+Network timeouts on the app side: connect 2 s, read 4 s, total call 6 s. Keep
+the manifest small and clips served fast (static files / CDN).
+
+### 1. Manifest endpoint
+
+`GET /api/v1/audio/permission-guidance/manifest` → `200 OK`, `application/json`
 
 ```json
 {
-  "language": "am",
-  "message": "how_to_use",
-  "sha256": "<64-hex sha256 of the MP3 bytes>",
-  "endpoint": "/api/v1/audio/permission-guidance/{language}/{message}"
+  "version": "2",
+  "supportedLanguages": ["en", "am", "om"],
+  "supportedMessages": ["camera", "microphone", "how_to_use"],
+  "clips": [
+    { "language": "am", "message": "camera",
+      "sha256": "<64-hex>",
+      "endpoint": "/api/v1/audio/permission-guidance/{language}/{message}" },
+    { "language": "am", "message": "microphone",
+      "sha256": "<64-hex>",
+      "endpoint": "/api/v1/audio/permission-guidance/{language}/{message}" },
+    { "language": "am", "message": "how_to_use",
+      "sha256": "<64-hex sha256 of the exact MP3 bytes served>",
+      "endpoint": "/api/v1/audio/permission-guidance/{language}/{message}" }
+  ]
 }
 ```
 
-3. Serve the file at the endpoint (placeholders substituted). Example URL:
-   `/api/v1/audio/permission-guidance/am/how_to_use`
-4. Bump the manifest `version` string when you replace clips.
+Field rules (the app enforces all of these):
 
-**Scope:** Amharic only for now. English and Afaan Oromoo narrations are
-phase 2 — the app needs no changes when you add them (just new clip entries +
-the `en`/`om` scripts below, same spec).
+| Field | Rule |
+| --- | --- |
+| `version` | string; becomes part of cache filenames — **bump it whenever any clip changes** |
+| `supportedLanguages` | array of strings; must contain the clip's `language` |
+| `supportedMessages` | array of strings; must contain the clip's `message` — **add `"how_to_use"`** |
+| `clips[].language` | one of `en` / `am` / `om` (app-side whitelist) |
+| `clips[].message` | one of `camera` / `microphone` / `how_to_use` (app-side whitelist) |
+| `clips[].sha256` | 64 hex chars; compared **case-insensitively** against the served bytes |
+| `clips[].endpoint` | path with `{language}` and `{message}` placeholders; resolved against the API base URL |
+
+Unknown extra entries are ignored safely, so you can stage future clips/messages
+without waiting for app releases.
+
+### 2. Clip endpoint
+
+`GET {base}{endpoint}` with placeholders substituted — e.g.
+`/api/v1/audio/permission-guidance/am/how_to_use` — with request header
+`Accept: audio/mpeg`.
+
+Hard requirements:
+
+- **HTTP 200** and a non-empty body.
+- **`Content-Type` must be exactly `audio/mpeg`** (`audio/mpeg; charset=binary`
+  is tolerated — anything else is rejected). Do not serve as
+  `application/octet-stream`.
+- **Byte-stable**: the bytes served at that URL must hash to the manifest's
+  `sha256` at all times. When you re-generate audio, update the manifest
+  `sha256` and bump `version` in the same deploy.
+- **No auth**: the app sends no credentials on these calls — the endpoints must
+  be publicly readable (like the existing camera/microphone clips).
+- Idempotent GETs: the app may re-request the same clip several times (launch
+  preload + on guide open). Add `Cache-Control` / `ETag` so CDN and OS-level
+  HTTP caches can help.
+
+### Backend verification checklist
+
+```bash
+BASE=https://<your-api-host>
+
+# 1. Manifest parses and contains the new entry
+curl -s "$BASE/api/v1/audio/permission-guidance/manifest" | jq '.supportedMessages, .clips[-1]'
+
+# 2. Clip downloads with the right content type
+curl -sI "$BASE/api/v1/audio/permission-guidance/am/how_to_use" | grep -i content-type
+#    must print: content-type: audio/mpeg
+
+# 3. Checksum matches the manifest
+curl -s "$BASE/api/v1/audio/permission-guidance/am/how_to_use" -o clip.mp3
+sha256sum clip.mp3        # compare with the manifest sha256 (case-insensitive)
+file clip.mp3             # should report MPEG audio
+```
+
+If all three pass, the app will play the recorded voice; anything else silently
+falls back to device TTS.
 
 ## Phase-2 scripts (reference only — do not record yet)
 
