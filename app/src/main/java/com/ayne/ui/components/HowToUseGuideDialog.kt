@@ -51,31 +51,39 @@ import com.ayne.viewmodel.SupportedLanguage
  */
 fun howToUseScriptFor(language: SupportedLanguage): String = when (language) {
     SupportedLanguage.ENGLISH ->
-        "Welcome to Ayne, your eyes for the world around you. Ayne has three main actions. " +
+        "Welcome to Ayne. Ayne is an AI assistance app that describes your surroundings for you. " +
+            "Ayne has three main actions. " +
             "Describe Surroundings takes a photo and tells you what is in front of you. " +
+            "To do this, press Volume Up once. " +
             "Read Text reads signs, documents, and labels out loud. " +
+            "Point your camera at the text you want, and press the button called Read Text. " +
             "Ask Question lets you speak a question about what you see; it submits automatically when you pause. " +
-            "You can also use the volume keys: press Volume Up to capture and describe your surroundings, " +
-            "and Volume Down to ask a question. " +
+            "You can also use the volume buttons: Volume Up describes what is around you, " +
+            "and Volume Down asks follow-up questions. " +
             "When you press Next, Ayne will ask for camera and microphone permission. " +
             "Please allow both, so Ayne can see and listen for you."
     SupportedLanguage.AMHARIC ->
-        "እንኳን ወደ አይኔ በደህና መጡ። አይኔ ዙሪያዎን የሚያሳይዎት የዓይን እርዳታ መተግበሪያ ነው። ሦስት ዋና አገልግሎቶች አሉ። " +
-            "ዙሪያውን አስረዳ ፎቶ ነስቶ በፊትዎ ያለውን ይናገርልዎታል። " +
+        "እንኳን ወደ አይኔ በደህና መጡ። አይኔ ዙሪያዎን የሚያሳይዎት የእርዳታ ኤ እይ መተግበሪያ ነው። " +
+            "ሦስት ዋና አገልግሎቶች አሉ። " +
+            "ዙሪያውን አስረዳ ፎቶ አንስቶ በፊትዎ ያለውን ይናገርልዎታል። እሱን ለማድረግ ድምጽ መጨመሪያውን አንዴ ይንኩት። " +
             "ጽሑፍ አንብብ ምልክቶችን፣ ሰነዶችንና መለያዎችን ጮክ ብሎ ያነብብልዎታል። " +
-            "ጠይቅ በድምፅ ጥያቄ እንዲጠይቁ ያስችልዎታል፤ ሲያቆሙም በራሱ ይላካል። " +
-            "የድምፅ አዝራሮችንም መጠቀም ይችላሉ፦ የድምፅ መጨመሪያውን ተጭነው ዙሪያዎን ያስረዱ፤ " +
-            "የድምፅ መቀነሻውን ተጭነው ጥያቄ ይጠይቁ። " +
-            "ቀጥል ስትጫኑ አይኔ የካሜራና የማይክሮፎን ፈቃድ ይጠይቅዎታል። " +
-            "አይኔ ለእርስዎ እንዲያይና እንዲሰማ ሁለቱንም ይፍቀዱላቸው።"
+            "ካሜራዎን ወደ የምፈልጉት ጽሑፍ ያድርጉ እና Read Text የምለውን በተን ይንኩ። " +
+            "በድምፅ ጥያቄ እንዲጠይቁ ያስችልዎታል፤ ሲያቆሙም በራሱ ይላካል። " +
+            "የድምፅ በተኖችንም መጠቀም ይችላሉ፦ የድምፅ መጨመሪያውን ተጭነው ዙሪያዎን ያለውን ነገር ያስረዶዎታል፤ " +
+            "የድምፅ መቀነሻውን ተጭነው ተጨማሪ ጥያቄ ይጠይቁ። " +
+            "Next ስትጫኑ አይኔ የካሜራና የማይክሮፎን ፈቃድ ይጠይቅዎታል። " +
+            "አይኔ እርስዎን እንዲያይና እንዲሰማ ሁለቱንም ይፍቀዱላቸው።"
     SupportedLanguage.AFAN_OROMOO ->
-        "Baga nagaan Ayne dhuftan. Ayne ija keessaniif naannoo isin agarsiisa. Tajaajila gurguddoo sadii qaba. " +
-            "Naannoo Ibsi suuraa kaasee duraatti waan jiru isinitti hima. " +
+        "Baga nagaan Ayne dhuftan. Ayne naannoo isinitti ibsu gargaaraa AI dha. " +
+            "Tajaajila gurguddoo sadii qaba. " +
+            "Naannoo Ibsi suuraa kaasee duraatti waan jiru isinitti hima; kana godhuuf Volume+ yeroo tokko dhiibi. " +
             "Barruu Dubbisi asxaa, barreeffama fi mallattoo dhageessisee dubbisa. " +
-            "Gaaffii Gaafadhu gaaffii keessan sagaleedhaan gaafachuuf isin dandeessisa; yeroo dhaabdanis ofumaan ni ergama. " +
-            "Volume fayyadamuu dandeessu: Volume+ dhiibuun naannoo keessan ibsi; Volume− dhiibuun gaaffii gaafadhu. " +
-            "Yeroo Itti fuf dhiibdu, Ayne kabaja kameraa fi maayikiroofonii gaafata. " +
-            "Ayne isinitti arguufi isin dhaggeeffachuuf, isaan lachuu hayyami."
+            "Kaameraa keessan gara barruu barbaaddanitti qabadhaa, achis Button Barruu Dubbisi dhiibi. " +
+            "Gaaffii gaafachuuf isin dandeessisa; yeroo dhaabdanis ofumaan ni ergama. " +
+            "Volume irratti fayyadamuu dandeessu: Volume+ dhiibuun waan naannoo keessaniitti jiru isinitti ibsa; " +
+            "Volume gadi dhiibuun gaaffii dabalataa gaafadhaa. " +
+            "Yeroo Next dhiibdu, Ayne kabaja kameraa fi maayikiroofonii gaafata. " +
+            "Ayne isin arguufi isin dhaggeeffachuuf, isaan lachuu hayyamaa."
 }
 
 /**
