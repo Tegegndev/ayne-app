@@ -33,8 +33,13 @@ class AddisRealtimeClient(
     /** Set once the server confirms the session (after "ready"). */
     var onReady: (() -> Unit)? = null
 
-    /** Fires with the transcription of what the user said (may be blank when nothing was heard). */
-    var onUserTranscript: ((String) -> Unit)? = null
+    /**
+     * Fires with the transcription of what the user said, so the UI can show
+     * what the server heard ("live transcription"). [noSpeechDetected] is true
+     * when the server heard nothing usable — callers should not treat the
+     * (blank) text as a real turn.
+     */
+    var onUserTranscript: ((text: String, noSpeechDetected: Boolean) -> Unit)? = null
 
     /** Fires with the assistant's textual answer, when the stream includes one. */
     var onAssistantTranscript: ((String) -> Unit)? = null
@@ -137,7 +142,7 @@ class AddisRealtimeClient(
                     is AddisRealtimeEvent.Transcript -> {
                         if (event.role == "user") {
                             userText = event.text
-                            onUserTranscript?.invoke(event.text)
+                            onUserTranscript?.invoke(event.text, event.noSpeechDetected)
                         } else {
                             assistantText = event.text
                             onAssistantTranscript?.invoke(event.text)

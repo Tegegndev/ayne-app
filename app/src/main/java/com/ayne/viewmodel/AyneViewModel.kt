@@ -666,6 +666,14 @@ class AyneViewModel(
 
         val client = realtimeClient ?: AddisRealtimeClient().also { realtimeClient = it }
 
+        // Show what the server heard as soon as the user transcript arrives —
+        // otherwise Ask mode gives zero feedback about the recognized speech.
+        client.onUserTranscript = { text, noSpeechDetected ->
+            if (!noSpeechDetected && text.isNotBlank()) {
+                _uiState.update { it.copy(liveTranscription = text) }
+            }
+        }
+
         viewModelScope.launch {
             // 1. Capture the CURRENT camera view: every question carries the
             //    freshest image so visual questions stay context-aware. Used by
@@ -703,7 +711,7 @@ class AyneViewModel(
                 viewModelScope.launch {
                     val turns = buildList {
                         if (!userText.isNullOrBlank()) add(ConversationTurn("user", userText))
-                        if (!assistantText.isNullOrBlank()) add(ConversationTurn("assistant", assistantText))
+                        if (!assistantText.isNullOrBlank()) add(ConversationTurn("model", assistantText))
                     }
                     _uiState.update {
                         it.copy(
@@ -929,11 +937,19 @@ class AyneViewModel(
         val state = _uiState.value
         val progressMsg = context.getString(R.string.analyzing_surroundings)
 
-        // Reset history, activeSessionId, lock image, and clear previous optical readings
+        // Reset history, activeSessionId, lock image, and clear previous optical readings.
+        // The Ask session id/history MUST die here too: a fresh capture is a new
+        // scene, and a surviving askQuestionSessionId makes executeFollowUpRequest
+        // send sessionId without an image — the server then answers from ITS
+        // cached photo of the OLD Ask scene (the "recognition answers from a
+        // stale cache" bug), until the session finally expires with a nag.
         activeSessionId = null
         _uiState.update {
             it.copy(
                 activeSessionId = null,
+                askQuestionSessionId = null,
+                askQuestionHistory = emptyList(),
+                askQuestionLastAnswer = null,
                 isBusy = true,
                 busyMessage = progressMsg,
                 lockedImageBase64 = frameBase64,
@@ -1322,6 +1338,11 @@ class AyneViewModel(
                             context.getString(R.string.inadmissible_audio_prompt)
                         }
                         _userMessage.tryEmit(prompt)
+                        // Re-enter listening so one unheard take doesn't dead-end
+                        // the hands-free conversation loop.
+                        if (_uiState.value.isAskQuestionOpen) {
+                            scheduleHandsFreeRelisten(context)
+                        }
                     } else {
                         _uiState.update {
                             it.copy(
