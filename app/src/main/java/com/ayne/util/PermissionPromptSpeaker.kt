@@ -119,6 +119,18 @@ class PermissionPromptSpeaker(context: Context) {
         speakFallback(text, languageCode) { }
     }
 
+    /**
+     * Immediately interrupts whatever is being spoken (TTS utterance, pending
+     * speech, or a guidance clip). Called as soon as the user acts on a dialog
+     * — e.g. picking a language on first launch must cut off the welcome
+     * narration instead of letting it run to the end.
+     */
+    fun stop() {
+        pendingTts = null
+        stopAudio()
+        runCatching { tts?.stop() }
+    }
+
     /** Plays a cached clip, then launches Android's permission prompt; falls back to device TTS. */
     fun speakThen(
         text: String,
@@ -188,6 +200,10 @@ class PermissionPromptSpeaker(context: Context) {
         val locale = Locale.forLanguageTag(languageCode)
         val status = engine.setLanguage(locale)
         if (status == TextToSpeech.LANG_MISSING_DATA || status == TextToSpeech.LANG_NOT_SUPPORTED) {
+            // No voice for this language: still stop whatever is speaking so a
+            // stale announcement (e.g. the first-launch welcome) cannot keep
+            // talking after the user has already chosen.
+            engine.stop()
             onDone()
             return
         }
@@ -196,6 +212,7 @@ class PermissionPromptSpeaker(context: Context) {
         engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) = Unit
             override fun onDone(utteranceId: String?) = finish()
+            override fun onStop(utteranceId: String?, interrupted: Boolean) = finish()
             @Deprecated("Deprecated in Java")
             override fun onError(utteranceId: String?) = finish()
             override fun onError(utteranceId: String?, errorCode: Int) = finish()

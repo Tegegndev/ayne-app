@@ -699,6 +699,9 @@ fun AyneAppScreen(
                     showFirstLaunchPicker = false
                     firstLaunchResolved = true
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    // Cut off the startup welcome narration immediately — the
+                    // user has acted on it, so it must not keep talking.
+                    permissionPromptSpeaker.stop()
                     viewModel.onAction(context, AyneAction.SelectLanguage(language))
                     // Confirm in the chosen language (device TTS, best effort).
                     permissionPromptSpeaker.announce(language.displayName, language.code)
